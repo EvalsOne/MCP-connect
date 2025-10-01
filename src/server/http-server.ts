@@ -1,9 +1,12 @@
 import { EventEmitter } from 'events';
 import express, { Request, Response } from 'express';
-import { Config } from '../config/config.js';
+import { Config, StreamableServerConfig } from '../config/config.js';
 import { Logger } from '../utils/logger.js';
 import { MCPClientManager } from '../client/mcp-client-manager.js';
 import { TunnelManager } from '../utils/tunnel.js';
+import { StreamSessionManager } from '../stream/session-manager.js';
+import type { StreamSession } from '../stream/stream-session.js';
+import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 
 export class HttpServer {
   private app = express();
@@ -11,14 +14,18 @@ export class HttpServer {
   private readonly logger: Logger;
   private readonly mcpClient: MCPClientManager;
   private readonly accessToken: string;
+  private readonly allowedOrigins: string[];
   private tunnelManager?: TunnelManager;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private streamSessionCleanupTimer: NodeJS.Timeout | null = null;
   private clientCache: Map<string, {
     id: string,
     lastUsed: number,
     env?: Record<string, string>
   }> = new Map();
   private readonly CLIENT_CACHE_TTL = 5 * 60 * 1000; // five minutes caching time
+  private readonly streamSessionManager: StreamSessionManager;
+  private readonly streamableServers: Record<string, StreamableServerConfig>;
 
   constructor(config: Config, logger: Logger, mcpClient: MCPClientManager) {
     this.config = config;
@@ -27,21 +34,32 @@ export class HttpServer {
     
     EventEmitter.defaultMaxListeners = 15;
     
-    this.accessToken = process.env.ACCESS_TOKEN || '';
+    this.accessToken = this.config.security.authToken;
+    this.allowedOrigins = this.config.security.allowedOrigins;
     if (!this.accessToken) {
-      this.logger.warn('No ACCESS_TOKEN environment variable set. This is a security risk.');
+      this.logger.warn('No AUTH_TOKEN environment variable set. This is a security risk.');
     }
-    
+
     if (process.argv.includes('--tunnel')) {
       this.tunnelManager = new TunnelManager(logger);
     }
-    
+
+    this.streamableServers = this.config.streamable.servers;
+    this.streamSessionManager = new StreamSessionManager(
+      this.logger,
+      this.config.streamable.sessionTtlMs
+    );
+
     this.setupMiddleware();
     this.setupRoutes();
 
     this.setupHeartbeat();
 
     setInterval(() => this.cleanupClientCache(), this.CLIENT_CACHE_TTL);
+    this.streamSessionCleanupTimer = setInterval(
+      () => this.streamSessionManager.reapExpiredSessions(),
+      this.config.streamable.sessionTtlMs
+    );
   }
 
   private setupHeartbeat() {
@@ -71,6 +89,15 @@ export class HttpServer {
 
     // Bearer Token Authentication middleware
     this.app.use((req: Request, res: Response, next) => {
+      if (this.allowedOrigins.length > 0) {
+        const origin = req.headers.origin;
+        if (origin && !this.allowedOrigins.includes(origin)) {
+          this.logger.warn(`Rejected request due to origin mismatch: ${origin}`);
+          res.status(403).json({ error: 'Origin not allowed' });
+          return;
+        }
+      }
+
       const authHeader = req.headers.authorization;
       // If no auth header, check if access token is set
       if (this.accessToken) {
@@ -176,6 +203,27 @@ export class HttpServer {
         res.status(500).json({ error: 'Failed to process request' });
       }
     });
+
+    this.app.post('/mcp/:serverId', (req: Request, res: Response) => {
+      void this.handleStreamablePost(req, res);
+    });
+
+    this.app.get('/mcp/:_serverId', (req: Request, res: Response) => {
+      res.status(405).json({ error: 'GET not supported for MCP endpoint' });
+    });
+
+    this.app.delete('/mcp/:_serverId', async (req: Request, res: Response) => {
+      const sessionIdHeader = req.header('Mcp-Session-Id');
+      if (!sessionIdHeader) {
+        res.status(400).json({ error: 'Mcp-Session-Id header required' });
+        return;
+      }
+
+      await this.streamSessionManager.closeSession(sessionIdHeader).catch((error) => {
+        this.logger.error('Failed to close session:', error);
+      });
+      res.status(204).end();
+    });
   }
 
   public async start(): Promise<void> {
@@ -247,9 +295,227 @@ export class HttpServer {
 
     await Promise.all(closePromises);
     this.clientCache.clear();
-    
+
+    if (this.streamSessionCleanupTimer) {
+      clearInterval(this.streamSessionCleanupTimer);
+      this.streamSessionCleanupTimer = null;
+    }
+
+    await this.streamSessionManager.closeAll();
+
     if (this.tunnelManager) {
       await this.tunnelManager.disconnect();
+    }
+  }
+
+  private getStreamableServer(serverId: string): StreamableServerConfig | undefined {
+    return this.streamableServers[serverId];
+  }
+
+  private acceptHeaderSupportsStreaming(headerValue: string | undefined): boolean {
+    if (!headerValue) {
+      return false;
+    }
+
+    const values = headerValue
+      .split(',')
+      .map((value) => value.split(';')[0].trim().toLowerCase())
+      .filter((value) => value.length > 0);
+
+    return values.includes('application/json') && values.includes('text/event-stream');
+  }
+
+  private isJsonRpcRequest(message: JSONRPCMessage): message is Extract<JSONRPCMessage, { method: string; id: unknown }> {
+    return (
+      typeof (message as { method?: unknown }).method === 'string' &&
+      Object.prototype.hasOwnProperty.call(message, 'id')
+    );
+  }
+
+  private isJsonRpcResponse(message: JSONRPCMessage): message is Extract<JSONRPCMessage, { id: unknown }> {
+    const hasId = Object.prototype.hasOwnProperty.call(message, 'id');
+    const hasResult = Object.prototype.hasOwnProperty.call(message, 'result');
+    const hasError = Object.prototype.hasOwnProperty.call(message, 'error');
+    return hasId && (hasResult || hasError) && !Object.prototype.hasOwnProperty.call(message, 'method');
+  }
+
+  private async handleStreamablePost(req: Request, res: Response): Promise<void> {
+    const serverId = req.params.serverId;
+    const serverConfig = this.getStreamableServer(serverId);
+    if (!serverConfig) {
+      res.status(404).json({ error: `Unknown MCP server: ${serverId}` });
+      return;
+    }
+
+    if (!this.acceptHeaderSupportsStreaming(req.headers.accept)) {
+      res.status(406).json({ error: 'Accept header must include application/json and text/event-stream' });
+      return;
+    }
+
+    const payload = req.body;
+    const messages = Array.isArray(payload) ? payload : [payload];
+    if (!messages || messages.length === 0) {
+      res.status(400).json({ error: 'Request body must include at least one JSON-RPC message' });
+      return;
+    }
+
+    if (messages.some((message) => typeof message !== 'object' || message === null)) {
+      res.status(400).json({ error: 'Each JSON-RPC message must be an object' });
+      return;
+    }
+
+    const normalizedMessages = messages as JSONRPCMessage[];
+    const hasRequests = normalizedMessages.some((message) => this.isJsonRpcRequest(message));
+    const sessionHeader = req.header('Mcp-Session-Id');
+
+    let session: StreamSession | undefined;
+    let sessionId: string;
+
+    try {
+      if (!sessionHeader) {
+        if (!hasRequests) {
+          res.status(400).json({ error: 'Mcp-Session-Id header required when request body has no requests' });
+          return;
+        }
+
+        session = await this.streamSessionManager.createSession(serverId, serverConfig);
+        sessionId = session.id;
+      } else {
+        session = this.streamSessionManager.getSession(sessionHeader, serverId);
+        if (!session) {
+          res.status(404).json({ error: 'Session not found' });
+          return;
+        }
+        await session.ensureStarted();
+        sessionId = sessionHeader;
+      }
+    } catch (error) {
+      this.logger.error(`Failed to prepare session for server ${serverId}:`, error);
+      res.status(500).json({ error: 'Failed to establish session with MCP server' });
+      return;
+    }
+
+    res.setHeader('Mcp-Session-Id', sessionId);
+
+    const forwardMessages = async () => {
+      for (const message of normalizedMessages) {
+        await session!.send(message);
+      }
+    };
+
+    if (!hasRequests) {
+      try {
+        await forwardMessages();
+        res.status(202).end();
+      } catch (error) {
+        this.logger.error('Failed to forward JSON-RPC response batch:', error);
+        res.status(500).json({ error: 'Failed to forward messages to MCP server' });
+      }
+      return;
+    }
+
+    this.logger.info(`Streamable request for server ${serverId}`, {
+      sessionId,
+      messageCount: normalizedMessages.length
+    });
+
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    if (typeof (res as any).flushHeaders === 'function') {
+      (res as any).flushHeaders();
+    } else {
+      res.write('\n');
+    }
+
+    const pendingIds = new Set<string>();
+    for (const message of normalizedMessages) {
+      if (this.isJsonRpcRequest(message)) {
+        pendingIds.add(String(message.id));
+      }
+    }
+
+    let streamClosed = false;
+    let eventCounter = 0;
+
+    const writeEvent = (payload: unknown, eventType = 'message') => {
+      if (streamClosed || res.writableEnded) {
+        return;
+      }
+      try {
+        res.write(`event: ${eventType}\n`);
+        res.write(`id: ${++eventCounter}\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch (error) {
+        this.logger.error('Error writing SSE frame:', error);
+      }
+    };
+
+    const cleanup = () => {
+      if (streamClosed) {
+        return;
+      }
+      streamClosed = true;
+      session?.off('message', onSessionMessage);
+      session?.off('error', onSessionError);
+      session?.off('close', onSessionClose);
+      req.off('close', onClientClose);
+      if (!res.writableEnded) {
+        res.end();
+      }
+    };
+
+    const deliverMessage = (message: JSONRPCMessage) => {
+      let shouldCloseAfterWrite = false;
+      if (this.isJsonRpcResponse(message)) {
+        const key = String(message.id);
+        if (!pendingIds.has(key)) {
+          return;
+        }
+        pendingIds.delete(key);
+        shouldCloseAfterWrite = pendingIds.size === 0;
+      }
+
+      writeEvent(message);
+
+      if (shouldCloseAfterWrite) {
+        cleanup();
+      }
+    };
+
+    const onSessionMessage = (payload: JSONRPCMessage | JSONRPCMessage[]) => {
+      if (Array.isArray(payload)) {
+        payload.forEach((message) => deliverMessage(message));
+      } else {
+        deliverMessage(payload);
+      }
+    };
+
+    const onSessionError = (error: Error) => {
+      writeEvent({ error: error.message }, 'error');
+      cleanup();
+    };
+
+    const onSessionClose = () => {
+      cleanup();
+    };
+
+    const onClientClose = () => {
+      cleanup();
+    };
+
+    session.on('message', onSessionMessage);
+    session.on('error', onSessionError);
+    session.on('close', onSessionClose);
+    req.on('close', onClientClose);
+
+    try {
+      await forwardMessages();
+    } catch (error) {
+      this.logger.error('Failed to forward JSON-RPC request batch:', error);
+      writeEvent({ error: 'Failed to forward request to MCP server' }, 'error');
+      cleanup();
     }
   }
 

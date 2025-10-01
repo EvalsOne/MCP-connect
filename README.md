@@ -54,7 +54,20 @@ By bridging this gap, we can leverage the full potential of local MCP tools in c
    ```bash
    npm install
    ```
-4. Run MCP Connect
+4. (Optional) Configure streamable server mappings by defining `MCP_SERVERS` in `.env`:
+   ```env
+   MCP_SERVERS={
+     "github": {
+       "command": "npx",
+       "args": ["-y", "@modelcontextprotocol/server-github"],
+       "env": {
+         "GITHUB_PERSONAL_ACCESS_TOKEN": "<token>"
+       }
+     }
+   }
+   ```
+   Each key becomes an HTTP endpoint at `/mcp/<serverId>` that proxies to the listed stdio MCP server.
+5. Run MCP Connect
    ```bash
    # build MCP Connect
    npm run build
@@ -88,12 +101,66 @@ MCP Connect has built-in support for Ngrok tunnel. To run the bridge with a publ
    ``` 
 After MCP Connect is running, you can see the MCP bridge URL in the console.
 
+## Streamable HTTP Endpoint
+
+When `MCP_SERVERS` defines one or more servers, MCP Connect exposes a Streamable HTTP transport at `/mcp/:serverId`.
+
+1. **Initialize a session** (omit `Mcp-Session-Id` so the bridge assigns one):
+   ```bash
+   curl -i \
+     -H 'Authorization: Bearer <AUTH_TOKEN>' \
+     -H 'Content-Type: application/json' \
+     -H 'Accept: application/json, text/event-stream' \
+     -X POST http://localhost:3000/mcp/github \
+     -d '{
+           "jsonrpc": "2.0",
+           "id": 1,
+           "method": "initialize",
+           "params": {
+             "protocolVersion": "2025-03-26",
+             "capabilities": {},
+             "implementation": { "name": "demo-client", "version": "0.1.0" }
+           }
+         }'
+   ```
+   The response headers include `Mcp-Session-Id`; reuse it on subsequent requests.
+
+2. **Stream a request** (expect Server-Sent Events):
+   ```bash
+   curl -N \
+     -H 'Authorization: Bearer <AUTH_TOKEN>' \
+     -H 'Content-Type: application/json' \
+     -H 'Accept: application/json, text/event-stream' \
+     -H 'Mcp-Session-Id: <session-from-step-1>' \
+     -X POST http://localhost:3000/mcp/github \
+     -d '[{
+           "jsonrpc": "2.0",
+           "id": 42,
+           "method": "tools/call",
+           "params": {"name": "search_repositories", "arguments": {"query": "modelcontextprotocol"}}
+         }]'
+   ```
+   The terminal prints SSE frames containing the server's responses and notifications. When the final response for the supplied request IDs is delivered the stream closes automatically.
+
+3. **Send responses or notifications back** using the same session:
+   ```bash
+   curl \
+     -H 'Authorization: Bearer <AUTH_TOKEN>' \
+     -H 'Content-Type: application/json' \
+     -H 'Accept: application/json, text/event-stream' \
+     -H 'Mcp-Session-Id: <session-from-step-1>' \
+     -X POST http://localhost:3000/mcp/github \
+     -d '{"jsonrpc":"2.0","id":99,"result":{}}'
+   ```
+   Requests without JSON-RPC `id` values return HTTP 202 to acknowledge the message.
+
 ## API Endpoints
 
 After MCP Connect is running, there are two endpoints exposed:
 
 - `GET /health`: Health check endpoint
 - `POST /bridge`: Main bridge endpoint for receiving requests from the cloud
+- `POST /mcp/:serverId`: Streamable HTTP endpoint that proxies to the configured stdio MCP server
 
 For example, the following is a configuration of the official [GitHub MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/github):
 
@@ -186,6 +253,9 @@ Required environment variables:
 - `PORT`: HTTP server port (default: 3000, required)
 - `LOG_LEVEL`: Logging level (default: info, required)
 - `NGROK_AUTH_TOKEN`: Ngrok auth token (Optional)
+- `MCP_SERVERS`: JSON object describing stdio MCP servers exposable via Streamable HTTP (Optional)
+- `ALLOWED_ORIGINS`: Comma separated Origins allowed to call the HTTP bridge (Optional)
+- `STREAM_SESSION_TTL_MS`: Idle timeout for streamable MCP sessions (Optional, default 300000)
 
 ## Using MCP Connect with ConsoleX AI to access local MCP Server
 
