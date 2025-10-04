@@ -170,10 +170,8 @@ export class HttpServer {
             await this.mcpClient.executeRequest(cachedClient.id, 'ping', {});
             clientId = cachedClient.id;
             cachedClient.lastUsed = Date.now();
-            this.logger.debug(`Using cached client: ${clientId}`);
           } catch (error) {
             // If the connection is invalid, delete the cache and create a new one
-            this.logger.warn(`Cached client ${cachedClient.id} is invalid, creating new one`);
             await this.mcpClient.closeClient(cachedClient.id).catch(() => {});
             this.clientCache.delete(cacheKey);
             clientId = await this.mcpClient.createClient(serverPath, args, env);
@@ -191,7 +189,6 @@ export class HttpServer {
             lastUsed: Date.now(),
             env
           });
-          this.logger.info(`Created new client: ${clientId}`);
         }
 
         // Execute request
@@ -213,9 +210,9 @@ export class HttpServer {
     });
 
     this.app.delete('/mcp/:_serverId', async (req: Request, res: Response) => {
-      const sessionIdHeader = req.header('Mcp-Session-Id');
+      const sessionIdHeader = req.header('mcp-session-id');
       if (!sessionIdHeader) {
-        res.status(400).json({ error: 'Mcp-Session-Id header required' });
+        res.status(400).json({ error: 'mcp-session-id header required' });
         return;
       }
 
@@ -343,10 +340,10 @@ export class HttpServer {
     const serverId = req.params.serverId;
     const serverConfig = this.getStreamableServer(serverId);
     if (!serverConfig) {
+      this.logger.warn(`Streamable request received for unknown serverId: ${serverId}`);
       res.status(404).json({ error: `Unknown MCP server: ${serverId}` });
       return;
     }
-
     if (!this.acceptHeaderSupportsStreaming(req.headers.accept)) {
       res.status(406).json({ error: 'Accept header must include application/json and text/event-stream' });
       return;
@@ -363,10 +360,9 @@ export class HttpServer {
       res.status(400).json({ error: 'Each JSON-RPC message must be an object' });
       return;
     }
-
     const normalizedMessages = messages as JSONRPCMessage[];
     const hasRequests = normalizedMessages.some((message) => this.isJsonRpcRequest(message));
-    const sessionHeader = req.header('Mcp-Session-Id');
+    const sessionHeader = req.header('mcp-session-id');
 
     let session: StreamSession | undefined;
     let sessionId: string;
@@ -374,7 +370,7 @@ export class HttpServer {
     try {
       if (!sessionHeader) {
         if (!hasRequests) {
-          res.status(400).json({ error: 'Mcp-Session-Id header required when request body has no requests' });
+          res.status(400).json({ error: 'mcp-session-id header required when request body has no requests' });
           return;
         }
 
@@ -390,12 +386,10 @@ export class HttpServer {
         sessionId = sessionHeader;
       }
     } catch (error) {
-      this.logger.error(`Failed to prepare session for server ${serverId}:`, error);
       res.status(500).json({ error: 'Failed to establish session with MCP server' });
       return;
     }
-
-    res.setHeader('Mcp-Session-Id', sessionId);
+    res.setHeader('mcp-session-id', sessionId);
 
     const forwardMessages = async () => {
       for (const message of normalizedMessages) {
@@ -408,16 +402,10 @@ export class HttpServer {
         await forwardMessages();
         res.status(202).end();
       } catch (error) {
-        this.logger.error('Failed to forward JSON-RPC response batch:', error);
         res.status(500).json({ error: 'Failed to forward messages to MCP server' });
       }
       return;
     }
-
-    this.logger.info(`Streamable request for server ${serverId}`, {
-      sessionId,
-      messageCount: normalizedMessages.length
-    });
 
     res.status(200);
     res.setHeader('Content-Type', 'text/event-stream');
@@ -528,7 +516,6 @@ export class HttpServer {
             this.logger.error(`Error closing client ${value.id}:`, err);
           });
           this.clientCache.delete(key);
-          this.logger.debug(`Cleaned up cached client: ${key}`);
         }
       } catch (error) {
         this.logger.error(`Error during cleanup for client ${value.id}:`, error);
