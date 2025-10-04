@@ -77,7 +77,7 @@ export function loadConfig(): Config {
       port: parseInt(process.env.PORT || '3000', 10),
     },
     security: {
-      authToken: process.env.AUTH_TOKEN || '',
+      authToken: process.env.AUTH_TOKEN || process.env.ACCESS_TOKEN || '',
       allowedOrigins: parseAllowedOrigins(),
     },
     logging: {
