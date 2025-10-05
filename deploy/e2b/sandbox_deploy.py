@@ -340,11 +340,12 @@ class E2BSandboxManager:
         }
 
         logger.info("Configuring MCP environment variables inside sandbox...")
+        # Quote values so dotenv doesn't treat # as comment
         env_file_contents = (
-            f"AUTH_TOKEN={self.config.auth_token}\n"
-            f"PORT={self.config.port}\n"
-            f"HOST={self.config.host}\n"
-            "LOG_LEVEL=info\n"
+            f"AUTH_TOKEN=\"{self.config.auth_token}\"\n"
+            f"PORT=\"{self.config.port}\"\n"
+            f"HOST=\"{self.config.host}\"\n"
+            "LOG_LEVEL=\"info\"\n"
         )
 
         # Ensure mcp-connect dir exists and write .env

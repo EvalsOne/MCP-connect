@@ -142,17 +142,8 @@ RUN mkdir -p /home/user/.config/mcp \
  > /home/user/.config/mcp/servers.json \
  && chown user:user /home/user/.config/mcp/servers.json
 
-RUN cat <<'EOF' > /home/user/chrome-devtools-wrapper.sh
-#!/bin/bash
-# Wrapper to ensure chrome-devtools-mcp connects to the running Chrome instance
-set -euo pipefail
-
-REMOTE_URL=${CHROME_REMOTE_DEBUGGING_URL:-http://127.0.0.1:9222}
-ARGS=("$@")
-
-# Pass HTTP debugging endpoint to MCP as per README (--browserUrl)
-exec chrome-devtools-mcp --browserUrl "$REMOTE_URL" "${ARGS[@]}"
-EOF
+# Install chrome-devtools wrapper script
+COPY scripts/chrome-devtools-wrapper.sh /home/user/chrome-devtools-wrapper.sh
 RUN chmod +x /home/user/chrome-devtools-wrapper.sh && chown user:user /home/user/chrome-devtools-wrapper.sh
 
 USER root

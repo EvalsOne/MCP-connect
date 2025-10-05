@@ -41,10 +41,11 @@ log "Using AUTH_TOKEN=${AUTH_TOKEN} PORT=${PORT} HOST=${HOST} DISPLAY=${XVFB_DIS
 # Prepare MCP-connect configuration
 cd /home/user/mcp-connect || { log "mcp-connect directory missing"; exit 1; }
 cat > .env <<ENVFILE
-AUTH_TOKEN=${AUTH_TOKEN}
-PORT=${PORT}
-HOST=${HOST}
-LOG_LEVEL=info
+# Quote values to avoid dotenv comment parsing (e.g. # in tokens)
+AUTH_TOKEN="${AUTH_TOKEN}"
+PORT="${PORT}"
+HOST="${HOST}"
+LOG_LEVEL="info"
 ENVFILE
 
 log "Node.js / npm versions:"

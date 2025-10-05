@@ -11,7 +11,7 @@
 <div align="center">
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org/)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.4+-blue)](https://www.typescriptlang.org/)
 
 **将 MCP 服务器转换为 HTTP API 的轻量级桥接服务**
@@ -24,7 +24,7 @@
 
 ## 📖 什么是 MCP Connect？
 
-MCP Connect？ 是一个 HTTP 网关服务，让你可以通过 HTTP 方式调用使用 Stdio 通信协议的本地 MCP 服务器。
+MCP Connect 是一个 HTTP 网关服务，让你可以通过 HTTP 方式调用使用 Stdio 通信协议的本地 MCP 服务器。
 
 ### 最新更新
 
@@ -89,35 +89,23 @@ ACCESS_TOKEN=your-secret-token-here
 NGROK_AUTH_TOKEN=your-ngrok-token
 ```
 
-**步骤 B：配置 MCP 服务器**（推荐使用 JSON 标准格式）
-
-```bash
-cp mcp-servers.example.json mcp-servers.json
-vim mcp-servers.json  # 编辑配置
-```
-
-```json
-{
-  "mcpServers": {
-    "fetch": {
-      "command": "uvx",
-      "args": ["mcp-server-fetch"],
-      "description": "HTTP 内容抓取"
-    }
-  }
-}
-```
-
-<details>
-<summary>其他配置方式</summary>
-
-**方式 2：YAML 格式**（更易读）
+**步骤 B：配置 MCP 服务器**（推荐使用 YAML）
 
 ```bash
 cp mcp-servers.example.yaml mcp-servers.yaml
+vim mcp-servers.yaml  # 编辑配置
 ```
 
-**方式 3：环境变量**（简单场景）
+```yaml
+servers:
+  fetch:
+    command: uvx
+    args: [mcp-server-fetch]
+    description: "HTTP 内容抓取"
+```
+
+<details>
+<summary>或使用环境变量方式（适合简单场景）</summary>
 
 在 `.env` 中添加：
 
@@ -213,63 +201,79 @@ asyncio.run(main())
 
 #### 步骤 1：配置服务器
 
-**推荐方式：使用 JSON 配置文件**（MCP 标准格式）⭐
+**推荐方式：使用 YAML 配置文件** ⭐
 
-创建 `mcp-servers.json`：
+创建 `mcp-servers.yaml`：
 
-```json
-{
-  "mcpServers": {
-    "fetch": {
-      "command": "uvx",
-      "args": ["mcp-server-fetch"],
-      "description": "HTTP/HTTPS 内容抓取工具"
-    },
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-      "description": "访问 /tmp 目录"
-    },
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
-      },
-      "description": "GitHub API 集成"
-    }
-  }
-}
+```yaml
+servers:
+  fetch:
+    command: uvx
+    args:
+      - mcp-server-fetch
+    description: "HTTP/HTTPS 内容抓取工具"
+
+  filesystem:
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-filesystem"
+      - /tmp
+    description: "访问 /tmp 目录"
+
+  github:
+    command: npx
+    args:
+      Or directly with Python scripts (now with selectable Dockerfile & alias):
+      ```bash
+      # Dev (default full Dockerfile)
+      python deploy/e2b/build_dev.py --dockerfile e2b.Dockerfile --alias mcp-dev-gui
+
+      # Dev using minimal Dockerfile variant
+      python deploy/e2b/build_dev.py --dockerfile e2b.Dockerfile.minimal --alias mcp-dev-mini
+
+      # Prod (skip-cache on, can override)
+      python deploy/e2b/build_prod.py --dockerfile e2b.Dockerfile --alias mcp-prod-gui --skip-cache
+      ```
+      - -y
+      - "@modelcontextprotocol/server-github"
+    env:
+      # 安全引用环境变量
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+    description: "GitHub API 集成"
 ```
 
 然后在 `.env` 中设置敏感信息：
 
 ```env
+```bash
+# Default (uses built-in template id fallback)
+python deploy/e2b/e2b_sandbox_manager.py
+
+# Specify a template ID or alias produced from build scripts
+python deploy/e2b/e2b_sandbox_manager.py --template-id <template-or-alias> --sandbox-id my_sandbox
+
+# Fast create without waiting health + no internet
+python deploy/e2b/e2b_sandbox_manager.py --template-id <template-or-alias> --no-wait --no-internet
+```
 GITHUB_TOKEN=ghp_your_token_here
 ```
 
 <details>
-<summary><b>其他配置方式</b></summary>
+<summary><b>方式 2：使用环境变量（简单场景）</b></summary>
 
-**方式 2：YAML 格式**（更易读，支持注释）
-
-```yaml
-mcpServers:
-  fetch:
-    command: uvx
-    args: [mcp-server-fetch]
-```
-
-**方式 3：环境变量**（简单场景）
+在 `.env` 中添加服务器定义：
 
 ```env
-MCP_SERVERS={"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}
+MCP_SERVERS={"fetch":{"command":"uvx","args":["mcp-server-fetch"]},"filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"]}}
 ```
+
+**注意**：环境变量方式适合简单配置，复杂场景建议使用 YAML 文件。
 
 </details>
 
 > 💡 **提示**：
-> - JSON 格式与 MCP 标准配置保持一致
+> - YAML 文件更易读、支持注释、版本控制友好
 > - 支持环境变量引用：`${VAR_NAME}` 语法
 > - 详细配置指南：[docs/configuration-guide.md](docs/configuration-guide.md)
 
@@ -373,32 +377,27 @@ curl -X POST http://localhost:3000/bridge \
 
 ### MCP 服务器配置
 
-**推荐：使用 JSON 配置文件**（MCP 标准格式）
+**推荐：使用 YAML 配置文件**
 
-创建 `mcp-servers.json`（优先级最高）：
+创建 `mcp-servers.yaml`（优先级最高）：
 
-```json
-{
-  "mcpServers": {
-    "server-name": {
-      "command": "可执行命令",
-      "args": ["参数1", "参数2"],
-      "env": {
-        "KEY": "value",
-        "SECRET": "${ENV_VAR}"
-      },
-      "description": "服务器描述",
-      "timeout": 30000,
-      "retries": 3
-    }
-  }
-}
+```yaml
+servers:
+  server-name:
+    command: "可执行命令"
+    args: ["参数1", "参数2"]           # 可选
+    env:                               # 可选
+      KEY: "value"
+      SECRET: ${ENV_VAR}              # 引用环境变量
+    description: "服务器描述"          # 可选
+    timeout: 30000                     # 可选（毫秒）
+    retries: 3                         # 可选（重试次数）
 ```
 
 **配置优先级**：
-1. `mcp-servers.json` ← 最高优先级（MCP 标准）
-2. `mcp-servers.yaml` ← YAML 格式（更易读）
-3. `mcp-servers.yml`
+1. `mcp-servers.yaml` ← 最高优先级
+2. `mcp-servers.yml`
+3. `mcp-servers.json`
 4. `MCP_SERVERS` 环境变量 ← 兼容旧版本
 
 **配置示例**：
@@ -406,48 +405,29 @@ curl -X POST http://localhost:3000/bridge \
 <details>
 <summary>查看完整示例</summary>
 
-```json
-{
-  "mcpServers": {
-    "fetch": {
-      "command": "uvx",
-      "args": ["mcp-server-fetch"],
-      "description": "HTTP content fetcher"
-    },
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
-      },
-      "description": "GitHub API integration"
-    },
-    "database": {
-      "command": "/usr/local/bin/db-mcp-server",
-      "args": ["--host", "localhost"],
-      "env": {
-        "DATABASE_URL": "postgresql://${DB_USER}:${DB_PASS}@localhost/mydb"
-      },
-      "description": "PostgreSQL database access",
-      "timeout": 60000,
-      "retries": 3
-    }
-  }
-}
-```
-
-**YAML 格式示例**（可选）：
-
 ```yaml
-mcpServers:
+servers:
+  # 简单配置
   fetch:
     command: uvx
     args: [mcp-server-fetch]
+
+  # 带环境变量
   github:
     command: npx
     args: [-y, "@modelcontextprotocol/server-github"]
     env:
       GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+
+  # 完整配置
+  database:
+    command: /usr/local/bin/db-mcp-server
+    args: ["--host", "localhost"]
+    env:
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASS}@localhost/mydb
+    description: "PostgreSQL 数据库访问"
+    timeout: 60000
+    retries: 3
 ```
 
 </details>
@@ -706,36 +686,15 @@ STREAM_SESSION_TTL_MS=600000  # 改为 10 分钟
 
 ---
 
-## 📚 相关文档
-
-| 文档 | 说明 |
-|------|------|
-| [快速参考](docs/quick-reference.md) | 📋 常用命令和配置速查 |
-| [配置指南](docs/configuration-guide.md) | 🔧 17+ 场景配置示例 |
-| [部署指南](docs/deployment-guide.md) | 🚀 Docker/K8s/E2B 部署 |
-| [配置方案对比](docs/configuration-alternatives.md) | 📊 6 种方案分析 |
-| [E2B 快速开始](deploy/e2b/README.md) | ☁️ 云沙箱部署 |
-| [变更日志](CHANGELOG.md) | 📝 版本更新记录 |
-
----
-
 ## 🗺️ 路线图
 
-### v2.2.0（短期）
 - [ ] 添加完整的单元测试和集成测试
-- [ ] 配置验证 API
+- [ ] 支持 Prometheus metrics
+- [ ] WebSocket 双向流式传输
 - [ ] 配置文件热重载
-- [ ] Prometheus metrics 支持
-
-### v2.3.0（中期）
-- [ ] Web 管理界面
-- [ ] 动态增删服务器 API
+- [ ] Docker 镜像和 Kubernetes Helm Chart
 - [ ] OpenAPI/Swagger 文档
-
-### v3.0.0（长期）
-- [ ] 数据库存储配置
 - [ ] 多租户隔离
-- [ ] 分布式追踪（OpenTelemetry）
 
 ---
 
