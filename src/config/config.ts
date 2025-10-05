@@ -1,5 +1,11 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
+import yaml from 'js-yaml';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Load environment variables
 dotenv.config();
@@ -8,6 +14,9 @@ export interface StreamableServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  description?: string;
+  timeout?: number;
+  retries?: number;
 }
 
 export interface Config {
@@ -37,9 +46,80 @@ function validateConfig(config: Config): void {
   }
 }
 
+/**
+ * Resolve environment variable references in a string
+ * Example: "postgresql://${DB_USER}:${DB_PASS}@localhost"
+ */
+function resolveEnvVars(value: string): string {
+  return value.replace(/\$\{([^}]+)\}/g, (_, envVar) => {
+    return process.env[envVar] || '';
+  });
+}
+
+/**
+ * Recursively resolve environment variables in an object
+ */
+function resolveEnvVarsInObject(obj: any): any {
+  if (typeof obj === 'string') {
+    return resolveEnvVars(obj);
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(resolveEnvVarsInObject);
+  }
+  if (obj && typeof obj === 'object') {
+    const result: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      result[key] = resolveEnvVarsInObject(value);
+    }
+    return result;
+  }
+  return obj;
+}
+
 function parseServers(): Record<string, StreamableServerConfig> {
+  // Priority 1: Load from JSON file
+  const configPaths = [
+    path.resolve(process.cwd(), 'mcp-servers.json'),
+  ];
+
+  for (const configPath of configPaths) {
+    if (fs.existsSync(configPath)) {
+      try {
+        const content = fs.readFileSync(configPath, 'utf8');
+        let parsed: any;
+
+        parsed = JSON.parse(content);
+
+        // Support both "mcpServers" (MCP standard) and "servers" (legacy) keys
+        const servers = parsed.mcpServers || parsed.servers || parsed;
+
+        // Validate and resolve env vars
+        const resolvedServers: Record<string, StreamableServerConfig> = {};
+        for (const [key, value] of Object.entries(servers)) {
+          if (!value || typeof value !== 'object') {
+            throw new Error(`Invalid server definition for key "${key}"`);
+          }
+          const config = value as any;
+          if (!config.command) {
+            throw new Error(`Missing command for server "${key}"`);
+          }
+
+          // Resolve environment variable references
+          resolvedServers[key] = resolveEnvVarsInObject(config);
+        }
+
+        console.log(`✓ Loaded MCP servers from ${configPath}`);
+        return resolvedServers;
+      } catch (error) {
+        throw new Error(`Failed to parse ${configPath}: ${String(error)}`);
+      }
+    }
+  }
+
+  // Priority 2: Fallback to MCP_SERVERS environment variable (legacy)
   const raw = process.env.MCP_SERVERS;
   if (!raw) {
+    console.log('⚠ No MCP server configuration found. Create mcp-servers.json or set MCP_SERVERS env var.');
     return {};
   }
 
@@ -53,7 +133,8 @@ function parseServers(): Record<string, StreamableServerConfig> {
         throw new Error(`Missing command for server "${key}"`);
       }
     });
-    return parsed;
+    console.log('✓ Loaded MCP servers from MCP_SERVERS environment variable');
+    return resolveEnvVarsInObject(parsed);
   } catch (error) {
     throw new Error(`Failed to parse MCP_SERVERS: ${String(error)}`);
   }

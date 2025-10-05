@@ -1,0 +1,290 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    gnupg \
+    ca-certificates \
+    lsb-release \
+    sudo \
+    python3 \
+    python3-pip \
+    build-essential \
+    software-properties-common \
+    nginx \
+    openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g npm@latest
+
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update \
+    && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
+    libnss3 \
+    libxss1 \
+    libasound2 \
+    libxtst6 \
+    xdg-utils \
+    libgbm1 \
+    libxshmfence1 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash -u 1000 user && \
+    echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+USER user
+WORKDIR /home/user
+
+RUN git clone https://github.com/EvalsOne/MCP-connect.git /home/user/mcp-connect && \
+    cd /home/user/mcp-connect && \
+    npm install && \
+    npm run build
+
+USER root
+RUN npm install -g chrome-devtools-mcp@latest
+USER user
+
+RUN mkdir -p /home/user/.config/mcp \
+ && printf '%s\n' \
+ '{' \
+ '  "servers": {' \
+ '    "chrome-devtools": {' \
+ '      "command": "chrome-devtools-mcp",' \
+ '      "args": [],' \
+ '      "env": {}' \
+ '    }' \
+ '  }' \
+ '}' \
+ > /home/user/.config/mcp/servers.json \
+ && chown user:user /home/user/.config/mcp/servers.json
+
+USER root
+
+RUN mkdir -p /etc/nginx/ssl && \
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -subj "/CN=localhost" \
+        -keyout /etc/nginx/ssl/server.key \
+        -out /etc/nginx/ssl/server.crt \
+        >/dev/null 2>&1
+
+RUN printf '%s\n' \
+'server {' \
+'    listen 443 default_server;' \
+'    listen [::]:443 default_server;' \
+'' \
+'    server_name _;' \
+'' \
+'    location = / {' \
+'        default_type text/plain;' \
+'        return 200 "MCP sandbox ready\\n";' \
+'    }' \
+'' \
+'    location / {' \
+'        proxy_pass http://127.0.0.1:3000/;' \
+'        proxy_http_version 1.1;' \
+'        proxy_set_header Upgrade $http_upgrade;' \
+'        proxy_set_header Connection "upgrade";' \
+'        proxy_set_header Host $host;' \
+'        proxy_cache_bypass $http_upgrade;' \
+'        proxy_set_header X-Real-IP $remote_addr;' \
+'        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+'        proxy_set_header X-Forwarded-Proto $scheme;' \
+'        proxy_connect_timeout 7d;' \
+'        proxy_send_timeout 7d;' \
+'        proxy_read_timeout 7d;' \
+'        proxy_buffering off;' \
+'    }' \
+'' \
+'    location /health {' \
+'        access_log off;' \
+'        return 200 "healthy\\n";' \
+'        add_header Content-Type text/plain;' \
+'    }' \
+'}' \
+'' \
+'server {' \
+'    listen 80 default_server;' \
+'    listen [::]:80 default_server;' \
+'' \
+'    server_name _;' \
+'' \
+'    location = / {' \
+'        default_type text/plain;' \
+'        return 200 "MCP sandbox ready\\n";' \
+'    }' \
+'' \
+'    location / {' \
+'        proxy_pass http://127.0.0.1:3000/;' \
+'        proxy_http_version 1.1;' \
+'        proxy_set_header Upgrade $http_upgrade;' \
+'        proxy_set_header Connection "upgrade";' \
+'        proxy_set_header Host $host;' \
+'        proxy_cache_bypass $http_upgrade;' \
+'        proxy_set_header X-Real-IP $remote_addr;' \
+'        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;' \
+'        proxy_set_header X-Forwarded-Proto $scheme;' \
+'        proxy_connect_timeout 7d;' \
+'        proxy_send_timeout 7d;' \
+'        proxy_read_timeout 7d;' \
+'        proxy_buffering off;' \
+'    }' \
+'' \
+'    location /health {' \
+'        access_log off;' \
+'        return 200 "healthy\\n";' \
+'        add_header Content-Type text/plain;' \
+'    }' \
+'}' \
+> /etc/nginx/sites-available/default
+
+RUN printf '%s\n' \
+'#!/bin/bash' \
+'' \
+'# E2B Custom Template Startup Script' \
+'# Starts nginx, headless Chrome, and MCP-connect services' \
+'' \
+'set -euo pipefail' \
+'' \
+'echo "Starting E2B MCP Sandbox..."' \
+'' \
+'AUTH_TOKEN="${AUTH_TOKEN:-demo#e2b}"' \
+'PORT="${PORT:-3000}"' \
+'HOST="${HOST:-127.0.0.1}"' \
+'' \
+'export AUTH_TOKEN PORT HOST' \
+'' \
+'echo "Using AUTH_TOKEN=${AUTH_TOKEN} PORT=${PORT} HOST=${HOST}"' \
+'' \
+'# Prepare MCP-connect configuration' \
+'cd /home/user/mcp-connect || { echo "mcp-connect directory missing"; exit 1; }' \
+'cat <<ENVFILE > .env' \
+'AUTH_TOKEN=${AUTH_TOKEN}' \
+'PORT=${PORT}' \
+'HOST=${HOST}' \
+'LOG_LEVEL=info' \
+'ENVFILE' \
+'' \
+'echo "Node.js / npm versions:"' \
+'node -v || { echo "node not found"; }' \
+'npm -v || { echo "npm not found"; }' \
+'' \
+'# Ensure dependencies are installed' \
+'if [ -f package.json ]; then' \
+'  if [ ! -d node_modules ]; then' \
+'    echo "Installing npm dependencies..."' \
+'    if command -v npm >/dev/null 2>&1; then' \
+'      (npm ci || npm install) || { echo "npm install failed"; exit 1; }' \
+'    else' \
+'      echo "npm is not available"; exit 1' \
+'    fi' \
+'  else' \
+'    echo "node_modules present; skipping npm install"' \
+'  fi' \
+'else' \
+'  echo "package.json missing; cannot install dependencies"; exit 1' \
+'fi' \
+'' \
+'# Launch headless Chrome for chrome-devtools integration (idempotent)' \
+'echo "Ensuring headless Chrome is running..."' \
+'if pgrep -f -- "--remote-debugging-port=9222" >/dev/null 2>&1; then' \
+'  echo "Chrome DevTools already running"' \
+'else' \
+'  mkdir -p /home/user/.chrome-data' \
+'  google-chrome \\' \
+'      --headless \\' \
+'      --no-sandbox \\' \
+'      --disable-dev-shm-usage \\' \
+'      --remote-debugging-port=9222 \\' \
+'      --remote-debugging-address=0.0.0.0 \\' \
+'      --disable-gpu \\' \
+'      --disable-features=VizDisplayCompositor \\' \
+'      --disable-software-rasterizer \\' \
+'      --user-data-dir=/home/user/.chrome-data \\' \
+'      > /home/user/chrome.log 2>&1 &' \
+'  CHROME_PID=$!' \
+'fi' \
+'' \
+'# Start nginx reverse proxy (idempotent)' \
+'echo "Ensuring nginx reverse proxy is running..."' \
+'if pgrep -x nginx >/dev/null 2>&1; then' \
+'  echo "nginx already running"' \
+'else' \
+'  sudo nginx -g "daemon off;" &' \
+'  NGINX_PID=$!' \
+'fi' \
+'' \
+'# Allow services to warm up' \
+'sleep 2' \
+'' \
+'# Launch MCP-connect in foreground-like mode (idempotent)' \
+'echo "Ensuring MCP-connect server is running..."' \
+'if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${PORT}/health | grep -q "^200$"; then' \
+'  echo "mcp-connect already healthy on port ${PORT}"' \
+'  MCP_PID=$(pgrep -f "npm run start" || echo "")' \
+'else' \
+'  npm run start &' \
+'  MCP_PID=$!' \
+'fi' \
+'' \
+'# Health check loop for MCP-connect' \
+'echo "Waiting for mcp-connect to become healthy..."' \
+'code=""' \
+'for i in $(seq 1 30); do' \
+'  code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:${PORT}/health || true)' \
+'  if [ "$code" = "200" ]; then' \
+'    echo "mcp-connect is healthy (HTTP 200)"' \
+'    break' \
+'  fi' \
+'  sleep 2' \
+'done' \
+'' \
+'if [ "$code" != "200" ]; then' \
+'  echo "mcp-connect failed to become healthy (last code: $code)"' \
+'  echo "--- tail chrome.log ---"' \
+'  tail -n 50 /home/user/chrome.log 2>/dev/null || true' \
+'  echo "--- tail nginx error.log ---"' \
+'  sudo tail -n 50 /var/log/nginx/error.log 2>/dev/null || true' \
+'  exit 1' \
+'fi' \
+'' \
+'cleanup() {' \
+'    echo "Shutting down services..."' \
+'    if [ -n "${MCP_PID:-}" ] && ps -p ${MCP_PID} > /dev/null 2>&1; then' \
+'        kill ${MCP_PID} 2>/dev/null || true' \
+'    fi' \
+'    if [ -n "${NGINX_PID:-}" ] && ps -p ${NGINX_PID} > /dev/null 2>&1; then' \
+'        sudo kill ${NGINX_PID} 2>/dev/null || true' \
+'    fi' \
+'    if [ -n "${CHROME_PID:-}" ] && ps -p ${CHROME_PID} > /dev/null 2>&1; then' \
+'        kill ${CHROME_PID} 2>/dev/null || true' \
+'    fi' \
+'}' \
+'' \
+'trap cleanup EXIT SIGTERM SIGINT' \
+'' \
+'wait ${MCP_PID}' \
+> /home/user/startup.sh \
+ && chown user:user /home/user/startup.sh \
+ && chmod +x /home/user/startup.sh
+
+RUN mkdir -p /home/user/app && \
+    chown -R user:user /home/user/app
+
+ENV AUTH_TOKEN="demo#e2b"
+ENV PORT=3000
+ENV HOST=127.0.0.1
+
+
+USER user
+WORKDIR /home/user
+
+CMD /bin/sh -c 'echo MCP template ready'

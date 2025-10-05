@@ -1,0 +1,52 @@
+# MCP Servers Configuration
+# Copy this file to mcp-servers.yaml and customize
+
+servers:
+  # Web content fetching server
+  fetch:
+    command: uvx
+    args:
+      - mcp-server-fetch
+    env:
+      # HTTP_PROXY: http://proxy.example.com:8080
+    # Optional: connection timeout in ms
+    # timeout: 30000
+    # Optional: max retry attempts
+    # retries: 3
+
+  # Local filesystem access
+  filesystem:
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-filesystem"
+      - /tmp
+    description: "Provides read/write access to /tmp directory"
+
+  # GitHub API integration
+  github:
+    command: npx
+    args:
+      - -y
+      - "@modelcontextprotocol/server-github"
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}  # Reference env var
+    description: "GitHub repository operations"
+
+  # Database query server
+  postgres:
+    command: docker
+    args:
+      - run
+      - --rm
+      - -i
+      - my-postgres-mcp-server
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/mydb
+    description: "PostgreSQL query interface"
+
+# Global defaults (optional)
+defaults:
+  timeout: 30000
+  retries: 2
+  sessionTtlMs: 300000

@@ -202,6 +202,7 @@ export class HttpServer {
     });
 
     this.app.post('/mcp/:serverId', (req: Request, res: Response) => {
+      this.logger.info(`MCP request received for serverId: ${req.params.serverId}`);
       void this.handleStreamablePost(req, res);
     });
 
@@ -337,6 +338,7 @@ export class HttpServer {
   }
 
   private async handleStreamablePost(req: Request, res: Response): Promise<void> {
+    this.logger.info(`Streamable request received: ${req.method} ${req.originalUrl}`);
     const serverId = req.params.serverId;
     const serverConfig = this.getStreamableServer(serverId);
     if (!serverConfig) {

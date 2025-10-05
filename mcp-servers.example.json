@@ -1,0 +1,32 @@
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "description": "HTTP/HTTPS content fetcher"
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
+      "description": "Local filesystem access to /tmp directory"
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "description": "GitHub API integration"
+    },
+    "postgres": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "postgres-mcp-server"],
+      "env": {
+        "DATABASE_URL": "postgresql://${DB_USER}:${DB_PASS}@localhost:5432/mydb"
+      },
+      "description": "PostgreSQL database query interface",
+      "timeout": 60000,
+      "retries": 3
+    }
+  }
+}

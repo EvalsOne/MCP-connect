@@ -1,0 +1,24 @@
+# Minimal dependencies for E2B sandbox manager + MCP GUI bootstrap
+# Install with: pip install -r deploy/e2b/requirements.txt
+
+# Core E2B async SDK (preferred)
+e2b>=0.12.0
+
+# HTTP client used for readiness/keepalive probes (gracefully optional, but recommended)
+httpx>=0.27.0
+
+# Optional: legacy interpreter SDK fallback (only if you rely on older templates)
+# e2b-code-interpreter>=0.0.15
+
+# Development / Testing (uncomment as needed)
+# pytest>=8.0.0
+# mypy>=1.10.0
+# types-requests
+
+# NOTE: Removed large web stack (Flask, Celery, Redis, etc.) because this repo's
+# deploy/e2b tooling only launches a browser + MCP bridge, not a web API backend.
+
+# E2B MCP Sandbox Requirements
+e2b-code-interpreter>=0.0.10
+aiohttp>=3.9.0
+python-dotenv>=1.0.0

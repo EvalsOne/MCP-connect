@@ -201,10 +201,19 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && npm install -g npm@latest
 
 # Install uv (provides `uv` and `uvx`) for the sandbox user and expose globally
+# Some builder environments do not support the -y flag for the install script;
+# add a retry + checksum-less fallback to avoid hard failure.
 USER user
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -y
+RUN set -euo pipefail; \
+        echo "Installing uv (primary method)"; \
+        if ! curl -fsSL https://astral.sh/uv/install.sh | sh -s --; then \
+            echo "Primary uv installation failed; retrying (no flags)..."; \
+            sleep 2; \
+            curl -fsSL https://astral.sh/uv/install.sh | sh -s -- || { echo 'uv install failed'; exit 1; }; \
+        fi; \
+        test -x "$HOME/.local/bin/uv" || { echo 'uv binary missing after install'; exit 1; }
 USER root
-RUN if [ -f /home/user/.local/bin/uv ]; then install -m 0755 /home/user/.local/bin/uv /usr/local/bin/uv; fi \
+RUN if [ -f /home/user/.local/bin/uv ]; then install -m 0755 /home/user/.local/bin/uv /usr/local/bin/uv; fi \ 
  && if [ -f /home/user/.local/bin/uvx ]; then install -m 0755 /home/user/.local/bin/uvx /usr/local/bin/uvx; else ln -sf /usr/local/bin/uv /usr/local/bin/uvx; fi
 
 RUN wget --progress=dot:giga -O /tmp/google-chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
@@ -241,8 +250,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 
-RUN useradd -m -s /bin/bash -u 1000 user && \
-    echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Create sandbox user (idempotent) and add to sudoers only once
+RUN set -euo pipefail; \
+        if id -u user >/dev/null 2>&1; then \
+            echo "User 'user' already exists, skipping creation"; \
+        else \
+            useradd -m -s /bin/bash -u 1000 user; \
+        fi; \
+        if ! grep -q '^user .*NOPASSWD:ALL' /etc/sudoers; then \
+            echo 'user ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers; \
+        fi
 
 USER user
 WORKDIR /home/user
