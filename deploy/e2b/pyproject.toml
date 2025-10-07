@@ -14,7 +14,6 @@ license = {text = "MIT"}
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -43,5 +42,7 @@ Issues = "https://github.com/EvalsOne/MCP-bridge/issues"
 e2b-mcp-sandbox = "sandbox_deploy:main"
 
 [tool.setuptools]
-packages = ["."]
-package-data = {"" = ["startup.sh", "chrome-devtools-wrapper.sh", "servers.json", "nginx.conf"]}
+py-modules = ["sandbox_deploy"]
+
+[tool.setuptools.package-data]
+"*" = ["startup.sh", "chrome-devtools-wrapper.sh", "servers.json", "nginx.conf"]

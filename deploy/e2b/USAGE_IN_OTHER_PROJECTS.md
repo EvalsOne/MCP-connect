@@ -4,35 +4,54 @@
 
 ## 📦 安装方式
 
-### 方式 1: 从 GitHub 直接安装（推荐）
+### ⚠️ 重要提示
 
-在你的项目中添加到 `requirements.txt`:
+如果你遇到 `pip install git+https://...` 安装卡住或配置错误，**强烈推荐使用方法 1（本地克隆）**，这是最快最可靠的方式。
+
+### 方式 1: 本地克隆安装（✅ 推荐 - 最快最稳定）
+
+```bash
+# 1. 浅克隆仓库（只下载最新代码，速度快）
+git clone --depth 1 --branch dev_streamable_http https://github.com/EvalsOne/MCP-bridge.git
+
+# 2. 进入目录并安装
+cd MCP-bridge/deploy/e2b
+pip install -e .
+
+# 3. 验证安装
+python verify_installation.py
+```
+
+### 方式 2: requirements.txt 方式（不推荐用于 GitHub 包）
+
+如果你一定要在 `requirements.txt` 中引用，建议使用以下格式：
 
 ```txt
-# 从 GitHub 主分支安装
-e2b-mcp-sandbox @ git+https://github.com/EvalsOne/MCP-bridge.git@main#subdirectory=deploy/e2b
+# 不推荐：直接从 GitHub 安装（可能很慢或失败）
+# e2b-mcp-sandbox @ git+https://github.com/EvalsOne/MCP-bridge.git@dev_streamable_http#subdirectory=deploy/e2b
 
-# 或从特定分支安装
-e2b-mcp-sandbox @ git+https://github.com/EvalsOne/MCP-bridge.git@dev_streamable_http#subdirectory=deploy/e2b
-
-# 或从特定 commit 安装
-e2b-mcp-sandbox @ git+https://github.com/EvalsOne/MCP-bridge.git@abc1234#subdirectory=deploy/e2b
+# 推荐：在安装脚本中手动克隆
+# 或使用本地路径引用
+-e /path/to/MCP-bridge/deploy/e2b
 ```
 
-然后安装:
+安装脚本示例：
 
 ```bash
+#!/bin/bash
+# install_deps.sh
+
+# 克隆 MCP-bridge（如果尚未克隆）
+if [ ! -d "external/MCP-bridge" ]; then
+    git clone --depth 1 --branch dev_streamable_http \
+        https://github.com/EvalsOne/MCP-bridge.git external/MCP-bridge
+fi
+
+# 安装其他依赖
 pip install -r requirements.txt
-```
 
-### 方式 2: 命令行直接安装
-
-```bash
-# 从 GitHub 安装
-pip install git+https://github.com/EvalsOne/MCP-bridge.git#subdirectory=deploy/e2b
-
-# 或指定分支
-pip install git+https://github.com/EvalsOne/MCP-bridge.git@dev_streamable_http#subdirectory=deploy/e2b
+# 安装 e2b-mcp-sandbox
+pip install -e external/MCP-bridge/deploy/e2b
 ```
 
 ### 方式 3: 作为 Git 子模块
@@ -59,8 +78,8 @@ from sandbox_deploy import E2BSandboxManager, SandboxConfig
 ### 方式 4: 本地开发安装
 
 ```bash
-# 克隆仓库
-git clone https://github.com/EvalsOne/MCP-bridge.git
+# 克隆仓库（推荐使用浅克隆加速）
+git clone --depth 1 --branch dev_streamable_http https://github.com/EvalsOne/MCP-bridge.git
 cd MCP-bridge/deploy/e2b
 
 # 开发模式安装（修改会立即生效）
@@ -445,7 +464,106 @@ config = SandboxConfig(
 - **E2B 文档**: https://e2b.dev/docs
 - **源代码**: https://github.com/EvalsOne/MCP-bridge
 
-## 💡 提示
+## �️ 故障排除
+
+### 安装卡在 git checkout 步骤
+
+**问题**: `pip install git+https://...` 卡在 "Running command git checkout..." 很久
+
+**原因**: pip 在克隆完整的 Git 历史，仓库较大时会很慢
+
+**解决方案**:
+
+1. **使用浅克隆（推荐）**:
+   ```bash
+   # 只克隆最新的提交
+   git clone --depth 1 --branch dev_streamable_http https://github.com/EvalsOne/MCP-bridge.git
+   cd MCP-bridge/deploy/e2b
+   pip install .
+   ```
+
+2. **取消当前安装并使用本地克隆**:
+   ```bash
+   # 按 Ctrl+C 取消当前安装
+   
+   # 使用浅克隆
+   git clone --depth 1 https://github.com/EvalsOne/MCP-bridge.git
+   pip install ./MCP-bridge/deploy/e2b
+   ```
+
+3. **配置 Git 使用更快的协议**:
+   ```bash
+   # 如果 HTTPS 慢，尝试 SSH
+   git config --global url."git@github.com:".insteadOf "https://github.com/"
+   ```
+
+4. **使用 pip 的 Git 选项**:
+   ```bash
+   pip install --no-cache-dir "git+https://github.com/EvalsOne/MCP-bridge.git@dev_streamable_http#subdirectory=deploy/e2b&egg=e2b-mcp-sandbox"
+   ```
+
+### 导入错误: ModuleNotFoundError
+
+**问题**: `ModuleNotFoundError: No module named 'sandbox_deploy'`
+
+**解决方案**:
+```bash
+# 确认安装成功
+pip show e2b-mcp-sandbox
+
+# 如果没有，重新安装
+cd /path/to/MCP-bridge/deploy/e2b
+pip install -e .
+```
+
+### E2B API Key 错误
+
+**问题**: `E2B_API_KEY environment variable not set`
+
+**解决方案**:
+```bash
+# 设置环境变量
+export E2B_API_KEY='your-api-key-here'
+
+# 或在代码中设置
+import os
+os.environ['E2B_API_KEY'] = 'your-api-key-here'
+```
+
+### 沙箱创建超时
+
+**问题**: 沙箱创建时间过长或超时
+
+**解决方案**:
+```python
+# 增加超时时间
+config = SandboxConfig(
+    template_id="your-template",
+    timeout=7200  # 2小时
+)
+
+# 或禁用等待就绪检查
+result = await manager.create_sandbox(
+    wait_for_ready=False  # 不等待健康检查
+)
+```
+
+### 包依赖冲突
+
+**问题**: 安装时出现依赖版本冲突
+
+**解决方案**:
+```bash
+# 使用虚拟环境隔离
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install ./MCP-bridge/deploy/e2b
+
+# 或使用 --ignore-installed
+pip install --ignore-installed ./MCP-bridge/deploy/e2b
+```
+
+## �💡 提示
 
 1. **始终设置超时**: 防止沙箱无限运行产生费用
 2. **使用环境变量**: 不要硬编码敏感信息

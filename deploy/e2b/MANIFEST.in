@@ -1,14 +1,23 @@
-# Include configuration and script files
+# Include documentation
 include README.md
+include INSTALL.md
+include USAGE_IN_OTHER_PROJECTS.md
+include LICENSE
+
+# Include configuration and script files
 include startup.sh
 include chrome-devtools-wrapper.sh
 include servers.json
 include nginx.conf
+include quick_install.sh
+include example_usage.py
 
-# Include config directory
+# Include config directory if present
 recursive-include config *
 
 # Exclude Python cache and build artifacts
 global-exclude __pycache__
 global-exclude *.py[cod]
 global-exclude .DS_Store
+global-exclude *.so
+global-exclude *.egg-info
