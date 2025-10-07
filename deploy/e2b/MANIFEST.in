@@ -1,0 +1,14 @@
+# Include configuration and script files
+include README.md
+include startup.sh
+include chrome-devtools-wrapper.sh
+include servers.json
+include nginx.conf
+
+# Include config directory
+recursive-include config *
+
+# Exclude Python cache and build artifacts
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude .DS_Store

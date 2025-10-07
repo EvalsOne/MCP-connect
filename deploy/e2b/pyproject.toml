@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "e2b-mcp-sandbox"
+version = "0.1.0"
+description = "E2B Sandbox Manager for MCP-enabled Web Sandbox"
+readme = "README.md"
+authors = [
+    {name = "EvalsOne", email = "your-email@example.com"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "e2b>=0.17.0",
+    "httpx>=0.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/EvalsOne/MCP-bridge"
+Repository = "https://github.com/EvalsOne/MCP-bridge"
+Issues = "https://github.com/EvalsOne/MCP-bridge/issues"
+
+[project.scripts]
+e2b-mcp-sandbox = "sandbox_deploy:main"
+
+[tool.setuptools]
+packages = ["."]
+package-data = {"" = ["startup.sh", "chrome-devtools-wrapper.sh", "servers.json", "nginx.conf"]}
