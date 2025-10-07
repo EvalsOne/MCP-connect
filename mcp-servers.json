@@ -15,6 +15,14 @@
       "args": [
         "chrome-devtools-mcp@latest",
         "--headless=false",
+        "--isolated=true"
+      ]
+    },
+    "chrome-devtools-e2b": {
+      "command": "npx",
+      "args": [
+        "chrome-devtools-mcp@latest",
+        "--headless=false",
         "--isolated=false",
         "--browserUrl=http://127.0.0.1:9222",
         "--logFile=/home/user/mcp-debug.log",

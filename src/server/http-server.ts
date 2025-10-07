@@ -18,12 +18,14 @@ export class HttpServer {
   private tunnelManager?: TunnelManager;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private streamSessionCleanupTimer: NodeJS.Timeout | null = null;
+  private bridgeCleanupTimer: NodeJS.Timeout | null = null;
   private clientCache: Map<string, {
     id: string,
     lastUsed: number,
     env?: Record<string, string>
   }> = new Map();
   private readonly CLIENT_CACHE_TTL = 5 * 60 * 1000; // five minutes caching time
+  private readonly CLEANUP_INTERVAL_DIVISOR = 3; // Run cleanup every TTL/3
   private readonly streamSessionManager: StreamSessionManager;
   private readonly streamableServers: Record<string, StreamableServerConfig>;
 
@@ -54,12 +56,7 @@ export class HttpServer {
     this.setupRoutes();
 
     this.setupHeartbeat();
-
-    setInterval(() => this.cleanupClientCache(), this.CLIENT_CACHE_TTL);
-    this.streamSessionCleanupTimer = setInterval(
-      () => this.streamSessionManager.reapExpiredSessions(),
-      this.config.streamable.sessionTtlMs
-    );
+    this.setupCleanupTimers();
   }
 
   private setupHeartbeat() {
@@ -76,6 +73,37 @@ export class HttpServer {
         });
       }
     }, 30000); 
+  }
+
+  private setupCleanupTimers() {
+    // Check if cleanup is disabled via environment variable
+    const disableBridgeCleanup = process.env.DISABLE_BRIDGE_CLEANUP === 'true';
+    const disableStreamCleanup = process.env.DISABLE_STREAM_CLEANUP === 'true';
+
+    if (!disableBridgeCleanup) {
+      // Run bridge cleanup every TTL/3 to catch expired sessions more frequently
+      // This reduces the window where an expired session might still be used
+      const bridgeCleanupInterval = Math.floor(this.CLIENT_CACHE_TTL / this.CLEANUP_INTERVAL_DIVISOR);
+      this.bridgeCleanupTimer = setInterval(
+        () => this.cleanupClientCache(),
+        bridgeCleanupInterval
+      );
+      this.logger.info(`Bridge session cleanup enabled (interval: ${bridgeCleanupInterval}ms, TTL: ${this.CLIENT_CACHE_TTL}ms)`);
+    } else {
+      this.logger.warn('Bridge session cleanup is DISABLED - sessions will not be automatically cleaned up');
+    }
+
+    if (!disableStreamCleanup) {
+      // Run streamable cleanup every TTL/3
+      const streamCleanupInterval = Math.floor(this.config.streamable.sessionTtlMs / this.CLEANUP_INTERVAL_DIVISOR);
+      this.streamSessionCleanupTimer = setInterval(
+        () => this.streamSessionManager.reapExpiredSessions(),
+        streamCleanupInterval
+      );
+      this.logger.info(`Streamable session cleanup enabled (interval: ${streamCleanupInterval}ms, TTL: ${this.config.streamable.sessionTtlMs}ms)`);
+    } else {
+      this.logger.warn('Streamable session cleanup is DISABLED - sessions will not be automatically cleaned up');
+    }
   }
 
   private setupMiddleware(): void {
@@ -282,6 +310,11 @@ export class HttpServer {
       this.reconnectTimer = null;
     }
 
+    if (this.bridgeCleanupTimer) {
+      clearInterval(this.bridgeCleanupTimer);
+      this.bridgeCleanupTimer = null;
+    }
+
     // Close all cached clients
     const closePromises = Array.from(this.clientCache.values()).map(async (client) => {
       try {
@@ -370,6 +403,7 @@ export class HttpServer {
     let sessionId: string;
 
     try {
+      this.logger.info(`Session header: ${sessionHeader}, hasRequests: ${hasRequests}`);
       if (!sessionHeader) {
         if (!hasRequests) {
           res.status(400).json({ error: 'mcp-session-id header required when request body has no requests' });
@@ -511,16 +545,32 @@ export class HttpServer {
 
   private async cleanupClientCache(): Promise<void> {
     const now = Date.now();
+    const expiredClients: Array<{ key: string; clientId: string; idleTime: number }> = [];
+
+    // First pass: identify expired clients
     for (const [key, value] of this.clientCache.entries()) {
+      const idleTime = now - value.lastUsed;
+      if (idleTime > this.CLIENT_CACHE_TTL) {
+        expiredClients.push({ key, clientId: value.id, idleTime });
+      }
+    }
+
+    if (expiredClients.length === 0) {
+      return;
+    }
+
+    this.logger.info(`Cleaning up ${expiredClients.length} expired bridge client(s)`);
+
+    // Second pass: close expired clients
+    for (const { key, clientId, idleTime } of expiredClients) {
       try {
-        if (now - value.lastUsed > this.CLIENT_CACHE_TTL) {
-          await this.mcpClient.closeClient(value.id).catch(err => {
-            this.logger.error(`Error closing client ${value.id}:`, err);
-          });
-          this.clientCache.delete(key);
-        }
+        this.logger.debug(`Closing bridge client ${clientId} (idle for ${Math.floor(idleTime / 1000)}s)`);
+        await this.mcpClient.closeClient(clientId).catch(err => {
+          this.logger.error(`Error closing client ${clientId}:`, err);
+        });
+        this.clientCache.delete(key);
       } catch (error) {
-        this.logger.error(`Error during cleanup for client ${value.id}:`, error);
+        this.logger.error(`Error during cleanup for client ${clientId}:`, error);
         this.clientCache.delete(key);
       }
     }
