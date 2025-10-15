@@ -39,10 +39,17 @@ Repository = "https://github.com/EvalsOne/MCP-bridge"
 Issues = "https://github.com/EvalsOne/MCP-bridge/issues"
 
 [project.scripts]
-e2b-mcp-sandbox = "sandbox_deploy:main"
+e2b-mcp-sandbox = "deploy.e2b.sandbox_deploy:main"
 
 [tool.setuptools]
+packages = ["deploy.e2b"]
+package-dir = {"deploy.e2b" = "."}
 py-modules = ["sandbox_deploy"]
 
 [tool.setuptools.package-data]
-"*" = ["startup.sh", "chrome-devtools-wrapper.sh", "servers.json", "nginx.conf"]
+"deploy.e2b" = [
+    "startup.sh",
+    "chrome-devtools-wrapper.sh",
+    "nginx.conf",
+    "config/**",
+]

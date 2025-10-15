@@ -49,6 +49,7 @@ except Exception:  # pragma: no cover
         pass
 import logging
 from datetime import datetime
+from importlib import resources as importlib_resources
 
 # Configure logging
 logging.basicConfig(
@@ -410,36 +411,76 @@ class E2BSandboxManager:
         local_wrapper = os.path.join(repo_dir, "chrome-devtools-wrapper.sh")
         local_servers = os.path.join(repo_dir, "servers.json")
 
-        if not os.path.isfile(local_startup):
-            logger.warning("Local startup.sh not found at %s; cannot upload", local_startup)
-        else:
+        # Try to load resources from packaged e2b_mcp_sandbox if not present next to this file
+        def _resource_text(pkg: str, name: str) -> Optional[str]:
+            try:
+                pkg_mod = __import__(pkg, fromlist=['dummy'])
+                ref = importlib_resources.files(pkg_mod) / name  # type: ignore
+                if ref.is_file():
+                    return ref.read_text(encoding='utf-8')
+            except Exception:
+                return None
+            return None
+
+        startup_contents: Optional[str] = None
+        if os.path.isfile(local_startup):
             with open(local_startup, "r", encoding="utf-8") as handle:
                 startup_contents = handle.read()
+        if startup_contents is None:
+            # try packaged fallback from this package path
+            startup_contents = _resource_text('deploy.e2b', 'startup.sh')
+            if startup_contents:
+                logger.info("Using packaged startup.sh from deploy.e2b")
+        if startup_contents is None:
+            logger.warning("Local startup.sh not found at %s and no packaged resource; cannot upload", local_startup)
+        else:
 
             logger.info("Uploading startup.sh to sandbox (overwriting existing copy)")
             await self._write(sandbox, "/home/user/startup.sh", startup_contents)
             startup_exists = True
 
+        wrapper_contents: Optional[str] = None
         if os.path.isfile(local_wrapper):
-            logger.info("Uploading chrome-devtools wrapper script to sandbox")
             with open(local_wrapper, "r", encoding="utf-8") as handle:
                 wrapper_contents = handle.read()
+        if wrapper_contents is None:
+            wrapper_contents = _resource_text('deploy.e2b', 'chrome-devtools-wrapper.sh')
+            if wrapper_contents:
+                logger.info("Using packaged chrome-devtools-wrapper.sh from deploy.e2b")
+        if wrapper_contents is None:
+            logger.warning("chrome-devtools wrapper script missing at %s and no packaged resource", local_wrapper)
+        else:
+            logger.info("Uploading chrome-devtools wrapper script to sandbox")
             await self._write(sandbox, "/home/user/chrome-devtools-wrapper.sh", wrapper_contents)
             try:
                 await self._run(sandbox, "bash -lc 'chmod +x /home/user/chrome-devtools-wrapper.sh'", background=False, cwd="/home/user")
             except CommandExitException as e:
                 logger.warning("Failed to chmod chrome-devtools-wrapper.sh: %s", getattr(e, 'stderr', '') or str(e))
-        else:
-            logger.warning("chrome-devtools wrapper script missing at %s", local_wrapper)
 
+        servers_contents: Optional[str] = None
         if os.path.isfile(local_servers):
-            logger.info("Updating MCP servers.json inside sandbox")
             with open(local_servers, "r", encoding="utf-8") as handle:
                 servers_contents = handle.read()
+        if servers_contents is None:
+            # also try root-level mcp-servers.json as a source of truth
+            try:
+                root_servers = os.path.abspath(os.path.join(repo_dir, os.pardir, os.pardir, "mcp-servers.json"))
+                if os.path.isfile(root_servers):
+                    with open(root_servers, "r", encoding="utf-8") as handle:
+                        servers_contents = handle.read()
+                    logger.info("Using root mcp-servers.json for sandbox config")
+            except Exception:
+                pass
+        if servers_contents is None:
+            servers_contents = _resource_text('deploy.e2b', 'servers.json')
+            if servers_contents:
+                logger.info("Using packaged servers.json from deploy.e2b")
+        if servers_contents is not None:
+            logger.info("Updating MCP servers.json inside sandbox")
             await self._run(sandbox, "mkdir -p /home/user/.config/mcp", background=False, cwd="/home/user")
             await self._write(sandbox, "/home/user/.config/mcp/servers.json", servers_contents)
         else:
-            logger.warning("servers.json not found at %s", local_servers)
+            logger.warning("servers.json not found at %s and no packaged/root alternative", local_servers)
 
         if startup_exists:
             try:
