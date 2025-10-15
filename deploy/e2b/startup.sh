@@ -32,6 +32,8 @@ VNC_PORT=${VNC_PORT:-5900}
 NOVNC_PORT=${NOVNC_PORT:-6080}
 NOVNC_WEBROOT=${NOVNC_WEBROOT:-/usr/share/novnc}
 VNC_PASSWORD=${VNC_PASSWORD:-}
+TINT2_ENABLED=${TINT2_ENABLED:-0}
+FLUXBOX_TOOLBAR=${FLUXBOX_TOOLBAR:-true}
 
 RESOLUTION_META=${XVFB_RESOLUTION}
 XVFB_WIDTH=${XVFB_WIDTH:-${RESOLUTION_META%%x*}}
@@ -140,6 +142,8 @@ mkdir -p "$XDG_RUNTIME_DIR"
   --disable-features=VizDisplayCompositor \
   --disable-software-rasterizer \
   --no-first-run \
+  --start-maximized \
+  --window-size=${XVFB_WIDTH},${XVFB_HEIGHT} \
   --user-data-dir=/home/user/.chrome-data \
   "$@" &
 CHROME_LAUNCH_PID=$!
@@ -177,11 +181,23 @@ fi
 
 # Ensure Fluxbox toolbar is hidden to avoid double panels when using tint2
 if [ -f "${FLUXBOX_DIR}/init" ]; then
-  if grep -q '^session.screen0.toolbar.visible:' "${FLUXBOX_DIR}/init" 2>/dev/null; then
-    sed -i 's/^session.screen0.toolbar.visible:.*/session.screen0.toolbar.visible:  false/' "${FLUXBOX_DIR}/init" || true
-  else
-    echo 'session.screen0.toolbar.visible:  false' >> "${FLUXBOX_DIR}/init"
-  fi
+  case "${FLUXBOX_TOOLBAR}" in
+    1|true|TRUE|True)
+      if grep -q '^session.screen0.toolbar.visible:' "${FLUXBOX_DIR}/init" 2>/dev/null; then
+        sed -i 's/^session.screen0.toolbar.visible:.*/session.screen0.toolbar.visible:  true/' "${FLUXBOX_DIR}/init" || true
+      else
+        echo 'session.screen0.toolbar.visible:  true' >> "${FLUXBOX_DIR}/init"
+      fi
+      ;;
+    *)
+      # default: hide toolbar to avoid duplicate panels; may be re-enabled later if tint2 fails
+      if grep -q '^session.screen0.toolbar.visible:' "${FLUXBOX_DIR}/init" 2>/dev/null; then
+        sed -i 's/^session.screen0.toolbar.visible:.*/session.screen0.toolbar.visible:  false/' "${FLUXBOX_DIR}/init" || true
+      else
+        echo 'session.screen0.toolbar.visible:  false' >> "${FLUXBOX_DIR}/init"
+      fi
+      ;;
+  esac
 fi
 
 cat <<'DESKTOP_ENTRY' > "${DESKTOP_DIR}/Chrome.desktop"
@@ -217,17 +233,22 @@ nohup pcmanfm --desktop --profile=default > "${LOG_DIR}/pcmanfm.log" 2>&1 &
 PCMANFM_PID=$!
 echo ${PCMANFM_PID} > "${LOG_DIR}/pcmanfm.pid"
 
-log "Starting tint2 panel"
-pkill -x tint2 >/dev/null 2>&1 || true
-nohup tint2 > "${LOG_DIR}/tint2.log" 2>&1 &
-TINT2_PID=$!
-echo ${TINT2_PID} > "${LOG_DIR}/tint2.pid"
+if [ "${TINT2_ENABLED}" = "1" ] || [ "${TINT2_ENABLED}" = "true" ]; then
+  log "Starting tint2 panel"
+  pkill -x tint2 >/dev/null 2>&1 || true
+  nohup tint2 > "${LOG_DIR}/tint2.log" 2>&1 &
+  TINT2_PID=$!
+  echo ${TINT2_PID} > "${LOG_DIR}/tint2.pid"
+else
+  log "TINT2_ENABLED=0; skipping tint2"
+  TINT2_PID=""
+fi
 
 # If tint2 fails to start, re-enable Fluxbox toolbar as a fallback
 (
   sleep 1
-  if ! kill -0 ${TINT2_PID} >/dev/null 2>&1; then
-    if [ -f "${FLUXBOX_DIR}/init" ]; then
+  if [ -n "${TINT2_PID}" ] && ! kill -0 ${TINT2_PID} >/dev/null 2>&1; then
+    if [ -f "${FLUXBOX_DIR}/init" ] && [ "${FLUXBOX_TOOLBAR}" = "auto" ]; then
       if grep -q '^session.screen0.toolbar.visible:' "${FLUXBOX_DIR}/init" 2>/dev/null; then
         sed -i 's/^session.screen0.toolbar.visible:.*/session.screen0.toolbar.visible:  true/' "${FLUXBOX_DIR}/init" || true
       else
@@ -260,8 +281,7 @@ X11VNC_TUNING_OPTS=(
     -wait "${X11VNC_WAIT}" \
     -defer "${X11VNC_DEFER}" \
     -noxdamage \
-    -ncache_cr \
-    -ncache 10 \
+    -ncache 0 \
 )
 
 if [ -n "${X11VNC_EXTRA}" ]; then

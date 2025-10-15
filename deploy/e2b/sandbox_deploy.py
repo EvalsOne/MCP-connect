@@ -107,6 +107,11 @@ class E2BSandboxManager:
         if not self.config.novnc_path.endswith("/"):
             self.config.novnc_path = f"{self.config.novnc_path}/"
 
+        # Allow overriding resolution via env for convenience
+        env_res = os.getenv("XVFB_RESOLUTION") or os.getenv("E2B_XVFB_RESOLUTION")
+        if env_res and isinstance(env_res, str) and env_res.strip():
+            self.config.xvfb_resolution = env_res.strip()
+
         # Allow overriding timeout via environment variable (seconds)
         env_timeout = os.getenv("E2B_SANDBOX_TIMEOUT")
         if env_timeout:
@@ -222,7 +227,8 @@ class E2BSandboxManager:
             # Build noVNC URL with autoconnect, explicit websocket path, and auto password (URL-encoded)
             # Note: Including password in URL trades convenience for security; use only in trusted contexts.
             encoded_pw = _url_quote(vnc_password_resolved, safe="") if vnc_password_resolved else ""
-            common_qs = "autoconnect=1&path=/websockify"
+            # Scale the remote desktop to the browser instead of cropping
+            common_qs = "autoconnect=1&path=/websockify&resize=scale"
             novnc_url = (
                 f"{public_url.rstrip('/')}{self.config.novnc_path}vnc.html?{common_qs}"
                 + (f"&password={encoded_pw}" if encoded_pw else "")
@@ -929,6 +935,7 @@ async def main():
     parser.add_argument("--no-internet", action="store_true", help="Disable internet access inside sandbox")
     parser.add_argument("--no-wait", action="store_true", help="Do not wait for service readiness")
     parser.add_argument("--timeout", type=int, default=3600, help="Sandbox timeout seconds (default 3600)")
+    parser.add_argument("--xvfb-resolution", dest="xvfb_resolution", default=os.getenv("XVFB_RESOLUTION", ""), help="Set Xvfb resolution, e.g. 1280x800x24 (env: XVFB_RESOLUTION)")
     args = parser.parse_args()
 
     template_id = (args.template_id or os.getenv("E2B_TEMPLATE_ID", "")).strip()
@@ -936,6 +943,8 @@ async def main():
         print("❌ Error: Missing template ID. Provide --template-id or set E2B_TEMPLATE_ID.")
         sys.exit(2)
     config = SandboxConfig(template_id=template_id, timeout=args.timeout, metadata={"purpose": "mcp-dev-gui"})
+    if args.xvfb_resolution:
+        config.xvfb_resolution = args.xvfb_resolution
     manager = E2BSandboxManager(config)
     logger.info("Creating E2B sandbox (template=%s sandbox_id=%s)...", template_id, args.sandbox_id)
     result = await manager.create_sandbox(

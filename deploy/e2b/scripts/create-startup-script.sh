@@ -152,6 +152,7 @@ nohup x11vnc -display "${XVFB_DISPLAY}" \
     -localhost \
     -forever \
     -shared \
+    -ncache 0 \
     "${X11VNC_AUTH_OPTS[@]}" \
     -o "${LOG_DIR}/x11vnc.log" \
     > /dev/null 2>&1 &
