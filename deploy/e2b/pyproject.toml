@@ -51,5 +51,9 @@ py-modules = ["sandbox_deploy"]
     "startup.sh",
     "chrome-devtools-wrapper.sh",
     "nginx.conf",
+    "e2b.Dockerfile",
+    "e2b.Dockerfile.minimal",
+    "e2b.Dockerfile.simple",
+    "scripts/*",
     "config/**",
 ]

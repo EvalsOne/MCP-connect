@@ -11,6 +11,10 @@ include servers.json
 include nginx.conf
 include quick_install.sh
 include example_usage.py
+include e2b.Dockerfile
+include e2b.Dockerfile.minimal
+include e2b.Dockerfile.simple
+recursive-include scripts *
 
 # Include config directory if present
 recursive-include config *

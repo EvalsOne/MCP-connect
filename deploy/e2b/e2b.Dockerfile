@@ -140,9 +140,9 @@ USER root
 # Copy nginx configuration
 COPY nginx.conf /etc/nginx/sites-available/default
 
-# Create startup.sh script that launches all services
-COPY scripts/create-startup-script.sh /tmp/create-startup-script.sh
-RUN bash /tmp/create-startup-script.sh && rm /tmp/create-startup-script.sh
+# Copy startup.sh directly so updates in repo are reflected in the image
+COPY startup.sh /home/user/startup.sh
+RUN chmod +x /home/user/startup.sh && chown user:user /home/user/startup.sh
 
 RUN mkdir -p /home/user/app && \
     chown -R user:user /home/user/app
