@@ -13,6 +13,7 @@ session.screen0.toolbar.placement:   BottomCenter
 session.screen0.toolbar.widthPercent: 100
 session.screen0.toolbar.height: 28
 session.screen0.toolbar.layer:  Dock
+session.screen0.toolbar.visible:  false
 session.screen0.toolbar.maxOver:  False
 session.screen0.toolbar.alpha:   255
 session.screen0.iconbar.mode:    Workspace
