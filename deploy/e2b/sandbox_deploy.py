@@ -84,6 +84,8 @@ class SandboxConfig:
     novnc_path: str = "/novnc/"
     novnc_webroot: str = "/usr/share/novnc"
     vnc_password: Optional[str] = ""
+    # Headless/lightweight mode: skip X/Chrome/VNC/noVNC bootstrap
+    headless: bool = False
 
 class E2BSandboxManager:
     """Manager for E2B Sandboxes with MCP support"""
@@ -163,7 +165,7 @@ class E2BSandboxManager:
                     allow_internet_access=enable_internet,
                 )
 
-            logger.info("Sandbox launched; startup services handled by image entrypoint")
+            logger.info("Sandbox launched; startup handled by image entrypoint")
 
             # Generate sandbox ID if not provided
             if not sandbox_id:
@@ -224,27 +226,31 @@ class E2BSandboxManager:
             )
             # Derive displayed port for nginx based on the chosen URL
             nginx_port = 443 if public_url.startswith("https") else 80
-            # Build noVNC URL with autoconnect, explicit websocket path, and auto password (URL-encoded)
-            # Note: Including password in URL trades convenience for security; use only in trusted contexts.
-            encoded_pw = _url_quote(vnc_password_resolved, safe="") if vnc_password_resolved else ""
-            # Scale the remote desktop to the browser instead of cropping
-            common_qs = "autoconnect=1&path=/websockify&resize=scale"
-            novnc_url = (
-                f"{public_url.rstrip('/')}{self.config.novnc_path}vnc.html?{common_qs}"
-                + (f"&password={encoded_pw}" if encoded_pw else "")
-            )
-            # Derive websocket (noVNC/websockify) URL (public_url already includes scheme)
-            ws_scheme = "wss" if public_url.startswith("https") else "ws"
-            # public_url like https://host; we append /websockify
-            websocket_url = f"{ws_scheme}://{public_url.split('://', 1)[1].rstrip('/')}/websockify"
+            # Decide headless-like behavior based on CLI flag or template naming
+            template_headless_like = self._template_indicates_headless(self.config.template_id)
+            gui_disabled = self.config.headless or template_headless_like
+            novnc_url = None
+            websocket_url = None
+            if not gui_disabled:
+                # Build noVNC URL with autoconnect, explicit websocket path, and auto password (URL-encoded)
+                # Note: Including password in URL trades convenience for security; use only in trusted contexts.
+                encoded_pw = _url_quote(vnc_password_resolved, safe="") if vnc_password_resolved else ""
+                # Scale the remote desktop to the browser instead of cropping
+                common_qs = "autoconnect=1&path=/websockify&resize=scale"
+                novnc_url = (
+                    f"{public_url.rstrip('/')}{self.config.novnc_path}vnc.html?{common_qs}"
+                    + (f"&password={encoded_pw}" if encoded_pw else "")
+                )
+                # Derive websocket (noVNC/websockify) URL (public_url already includes scheme)
+                ws_scheme = "wss" if public_url.startswith("https") else "ws"
+                # public_url like https://host; we append /websockify
+                websocket_url = f"{ws_scheme}://{public_url.split('://', 1)[1].rstrip('/')}/websockify"
 
             result = {
                 "success": True,
                 "sandbox_id": sandbox_id,
                 "e2b_sandbox_id": sandbox.sandbox_id,
                 "public_url": public_url,
-                "novnc_url": novnc_url,
-                "websocket_url": websocket_url,
                 "vnc_password_resolved": vnc_password_resolved,
                 "services": {
                     "nginx": {
@@ -263,17 +269,17 @@ class E2BSandboxManager:
                     "chrome_devtools": {
                         "debug_port": 9222,
                         "display": self.config.display,
-                        "status": "running",
+                        "status": ("disabled" if gui_disabled else "running"),
                         "pid": handles["chrome"].pid if handles.get("chrome") else None,
                     },
                     "virtual_display": {
                         "display": self.config.display,
                         "resolution": self.config.xvfb_resolution,
-                        "status": "running",
+                        "status": ("disabled" if gui_disabled else "running"),
                     },
                     "vnc": {
                         "port": self.config.vnc_port,
-                        "status": "running",
+                        "status": ("disabled" if gui_disabled else "running"),
                         "password_hint": (
                             "custom" if (self.config.vnc_password and str(self.config.vnc_password).strip()) else "none"
                         ),
@@ -284,7 +290,7 @@ class E2BSandboxManager:
                         "websocket_url": websocket_url,
                         "port": self.config.novnc_port,
                         "path": self.config.novnc_path,
-                        "status": "running",
+                        "status": ("disabled" if gui_disabled else "running"),
                         "requires_password": bool(vnc_password_resolved),
                         "password_hint": (
                             "custom" if (self.config.vnc_password and str(self.config.vnc_password).strip()) else "none"
@@ -301,6 +307,12 @@ class E2BSandboxManager:
                 "internet_access": bool(enable_internet),
                 "probes": probe_result
             }
+
+            # Conditionally include optional URLs based on availability
+            if novnc_url:
+                result["novnc_url"] = novnc_url
+            if websocket_url:
+                result["websocket_url"] = websocket_url
 
             if fallback_url and fallback_url != public_url:
                 key = "public_url_http" if self.config.secure else "public_url_https"
@@ -420,6 +432,77 @@ class E2BSandboxManager:
             logger.warning("Failed to push/apply nginx.conf: %s", str(e))
 
         # Ensure startup.sh exists and use it to bootstrap services (Xvfb/x11vnc/noVNC/nginx/etc.)
+        # Headless mode: skip GUI bootstrap entirely; ensure nginx + mcp-connect only
+        if self.config.headless:
+            logger.info("Headless mode enabled: skipping GUI/noVNC/VNC services")
+            # Proactively stop any GUI services the image entrypoint may have launched
+            stop_gui_cmds = [
+                "bash -lc 'pkill -f -- \"--remote-debugging-port=9222\" 2>/dev/null || true'",
+                "bash -lc 'pkill -f websockify 2>/dev/null || true'",
+                "bash -lc 'pkill -f x11vnc 2>/dev/null || true'",
+                "bash -lc 'pkill -x fluxbox 2>/dev/null || true'",
+                "bash -lc 'pkill -f pcmanfm 2>/dev/null || true'",
+                f"bash -lc 'pkill -f \"Xvfb {self.config.display}\" 2>/dev/null || true'",
+            ]
+            for cmd in stop_gui_cmds:
+                try:
+                    await self._run(sandbox, cmd, background=False, cwd="/home/user")
+                except Exception:
+                    pass
+
+            # Ensure nginx running
+            try:
+                logger.info("Ensuring nginx reverse proxy is running (headless mode)")
+                nginx_cmd = "bash -lc 'if pgrep -x nginx >/dev/null; then echo nginx already running; else sudo nginx -g \"daemon off;\" & echo $! > /home/user/nginx.pid; fi'"
+                await self._run(sandbox, nginx_cmd, background=False, cwd="/home/user")
+            except CommandExitException as e:
+                logger.warning("Failed to start nginx: %s", getattr(e, 'stderr', '') or str(e))
+
+            # Start MCP-connect if not healthy
+            logger.info("Ensuring MCP-connect is running on port %s (headless)", self.config.port)
+            port = self.config.port
+            try:
+                port_probe = await self._run(sandbox, f"bash -lc \"code=$(curl -s -o /dev/null -w '%{{http_code}}' http://127.0.0.1:{port}/health || true); echo $code\"", background=False, cwd="/home/user")
+                mcp_listening = '200' in (port_probe.stdout or '')
+            except CommandExitException:
+                mcp_listening = False
+            mcp_envs = {**envs, "LOG_LEVEL": "info"}
+            if not mcp_listening:
+                try:
+                    final_dep_cmd = (
+                        "bash -lc "
+                        "'set -e; cd /home/user/mcp-connect; "
+                        "FORCE=${NPM_CI_ALWAYS:-0}; "
+                        "if [ \"$FORCE\" = \"1\" ] || [ ! -d node_modules ] || [ package-lock.json -nt node_modules ] || [ package.json -nt node_modules ]; then "
+                        "  echo \"Final dep check: installing/updating npm dependencies...\"; npm ci --no-audit || npm install --no-audit; "
+                        "else "
+                        "  echo \"Final dep check: node_modules up-to-date; skipping\"; "
+                        "fi'"
+                    )
+                    await self._run(sandbox, final_dep_cmd, background=False, envs=envs, cwd="/home/user")
+                except CommandExitException as e:
+                    logger.warning("Dependency check error (continuing): %s", getattr(e, 'stderr', '') or str(e))
+
+                mcp_start_cmd = (
+                    "bash -lc "
+                    "'set -e; cd /home/user/mcp-connect; "
+                    "nohup npm run start > start.log 2>&1 & echo $! > mcp.pid'"
+                )
+                await self._run(sandbox, mcp_start_cmd, background=False, envs=mcp_envs, cwd="/home/user")
+
+            return {
+                "handles": {
+                    "chrome": None,
+                    "nginx": None,
+                    "mcp_connect": None,
+                    "xvfb": None,
+                    "fluxbox": None,
+                    "x11vnc": None,
+                    "novnc": None,
+                },
+                "envs": mcp_envs,
+            }
+
         logger.info("Ensuring startup.sh is available inside sandbox")
         startup_exists = False
         try:
@@ -604,6 +687,17 @@ class E2BSandboxManager:
         width_digits = ''.join(ch for ch in width if ch.isdigit()) or "1920"
         height_digits = ''.join(ch for ch in height if ch.isdigit()) or "1080"
         return width_digits, height_digits
+
+    @staticmethod
+    def _template_indicates_headless(template_id: str) -> bool:
+        """Infer headless-like behavior from template naming conventions.
+
+        Treat aliases or IDs containing 'minimal' or 'simple' as headless (no GUI/noVNC).
+        This heuristic avoids exposing noVNC URLs for minimal/simple templates.
+        """
+        tid = (template_id or "").lower()
+        patterns = ("minimal", "simple", "mcp-dev-minimal", "mcp-dev-simple")
+        return any(p in tid for p in patterns)
 
     def _get_public_url(self, sandbox, secure: Optional[bool] = None) -> str:
         """
@@ -936,13 +1030,19 @@ async def main():
     parser.add_argument("--no-wait", action="store_true", help="Do not wait for service readiness")
     parser.add_argument("--timeout", type=int, default=3600, help="Sandbox timeout seconds (default 3600)")
     parser.add_argument("--xvfb-resolution", dest="xvfb_resolution", default=os.getenv("XVFB_RESOLUTION", ""), help="Set Xvfb resolution, e.g. 1280x800x24 (env: XVFB_RESOLUTION)")
+    parser.add_argument("--headless", action="store_true", help="Launch in lightweight headless mode (no X/noVNC/VNC/Chrome)")
     args = parser.parse_args()
 
     template_id = (args.template_id or os.getenv("E2B_TEMPLATE_ID", "")).strip()
     if not template_id:
         print("❌ Error: Missing template ID. Provide --template-id or set E2B_TEMPLATE_ID.")
         sys.exit(2)
-    config = SandboxConfig(template_id=template_id, timeout=args.timeout, metadata={"purpose": "mcp-dev-gui"})
+    config = SandboxConfig(
+        template_id=template_id,
+        timeout=args.timeout,
+        metadata={"purpose": ("mcp-dev-headless" if args.headless else "mcp-dev-gui")},
+        headless=bool(args.headless),
+    )
     if args.xvfb_resolution:
         config.xvfb_resolution = args.xvfb_resolution
     manager = E2BSandboxManager(config)
@@ -961,10 +1061,11 @@ async def main():
     print("="*60)
     print(f"\n📦 Sandbox ID: {result['sandbox_id']}")
     print(f"🌐 Public URL: {result['public_url']}")
-    if 'novnc_url' in result:
-        print(f"🖥️  noVNC URL: {result['novnc_url']}")
-    if 'websocket_url' in result:
-        print(f"🔌 WebSocket URL: {result['websocket_url']}")
+    if not args.headless:
+        if 'novnc_url' in result and result['novnc_url']:
+            print(f"🖥️  noVNC URL: {result['novnc_url']}")
+        if 'websocket_url' in result and result['websocket_url']:
+            print(f"🔌 WebSocket URL: {result['websocket_url']}")
     print(f"\n🔧 Services:")
     for service_name, service_info in result['services'].items():
         print(f"  - {service_name}:")

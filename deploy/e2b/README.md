@@ -32,13 +32,21 @@ python build_prod.py
 
 参数说明：
 
+- `--variant`
+  - 说明：模板便捷选择（自动映射到内置 Dockerfile）。
+  - 可选值：`full`（GUI + noVNC）、`simple`（无 X 桌面，仅 headless Chrome）、`minimal`（最小化，无 X/Chrome/noVNC）。
+  - 默认值：`full`
+  - 示例：`--variant simple`
+
 - `--dockerfile`
-  - 说明：Dockerfile 的相对或绝对路径，用于构建模板镜像。
-  - 默认值：`e2b.Dockerfile`
+  - 说明：Dockerfile 的相对或绝对路径，用于构建模板镜像。若指定此项，将覆盖 `--variant` 的选择。
   - 示例：`--dockerfile e2b.Dockerfile.minimal`
 
 - `--alias`
-  - 说明：为构建的模板指定一个别名（alias），便于后续引用与注册。
+  - 说明：为构建的模板指定一个别名（alias）。未指定时会根据 `--variant` 自动选择：
+    - `full` → `mcp-dev-gui`
+    - `simple` → `mcp-dev-simple`
+    - `minimal` → `mcp-dev-minimal`
   - 示例：`--alias mcp-dev-gui`
 
 - `--cpu`
@@ -58,8 +66,11 @@ python build_prod.py
 示例：
 
 ```bash
-# 使用最小 Dockerfile，并注册为别名 mcp-dev-mini，分配 1 CPU、1GB 内存，并跳过缓存
-python build_dev.py --dockerfile e2b.Dockerfile.minimal --alias mcp-dev-mini --cpu 1 --memory-mb 1024 --skip-cache
+# 使用内置 simple 变体（无 X 桌面，无 noVNC，headless Chrome），并注册为 mcp-dev-simple
+python build_dev.py --variant simple --cpu 2 --memory-mb 2048
+
+# 使用最小化变体（无 X/Chrome/noVNC，最快启动），并注册为 mcp-dev-minimal
+python build_dev.py --variant minimal --cpu 1 --memory-mb 1024 --skip-cache
 
 # 使用默认 Dockerfile，但把 alias 设置为 mcp-dev-gui，分配 4 CPU、4GB 内存
 python build_dev.py --alias mcp-dev-gui --cpu 4 --memory-mb 4096
@@ -74,7 +85,11 @@ python build_dev.py --alias mcp-dev-gui --cpu 4 --memory-mb 4096
 运行预置的快速开始脚本：
 
 ```bash
+# GUI 模式（默认）
 python sandbox_deploy.py --template-id <template-id-or-alias>
+
+# 轻量级无桌面模式（跳过 X/Chrome/VNC/noVNC）
+python sandbox_deploy.py --template-id <template-id-or-alias> --headless
 ```
 
 此脚本会：
@@ -109,6 +124,10 @@ python sandbox_deploy.py --template-id <template-id-or-alias>
   - 说明：沙箱的生命周期（秒）。该值也可以通过环境变量 `E2B_SANDBOX_TIMEOUT` 设置。
   - 默认值：`3600`（1 小时）
   - 示例：`--timeout 7200`
+
+- `--headless`
+  - 说明：轻量级无桌面模式；跳过 Xvfb/fluxbox/Chrome/VNC/noVNC 的启动，仅保留 Nginx + MCP-connect。适合对 GUI 不依赖的场景，可显著加快启动速度。
+  - 默认值：关闭（GUI 模式）。
 
 重要环境变量：
 

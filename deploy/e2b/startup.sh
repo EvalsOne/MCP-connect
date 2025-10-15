@@ -25,6 +25,7 @@ log "Startup script version: ${STARTUP_VERSION}"
 AUTH_TOKEN=${AUTH_TOKEN:-demo#e2b}
 PORT=${PORT:-3000}
 HOST=${HOST:-127.0.0.1}
+HEADLESS=${HEADLESS:-0}
 DISPLAY=${DISPLAY:-:99}
 XVFB_DISPLAY=${XVFB_DISPLAY:-$DISPLAY}
 XVFB_RESOLUTION=${XVFB_RESOLUTION:-1920x1080x24}
@@ -42,11 +43,12 @@ XVFB_HEIGHT=${XVFB_HEIGHT:-${HEIGHT_WITH_DEPTH%%x*}}
 
 export AUTH_TOKEN PORT HOST DISPLAY XVFB_DISPLAY XVFB_RESOLUTION XVFB_WIDTH XVFB_HEIGHT VNC_PORT NOVNC_PORT NOVNC_WEBROOT
 
-log "Using AUTH_TOKEN=${AUTH_TOKEN} PORT=${PORT} HOST=${HOST} DISPLAY=${XVFB_DISPLAY}"
+log "Using AUTH_TOKEN=${AUTH_TOKEN} PORT=${PORT} HOST=${HOST} DISPLAY=${XVFB_DISPLAY} HEADLESS=${HEADLESS}"
 
-# Prepare MCP-connect configuration
-cd /home/user/mcp-connect || { log "mcp-connect directory missing"; exit 1; }
-cat <<ENVFILE > .env
+prepare_mcp_env() {
+    # Prepare MCP-connect configuration and ensure deps
+    cd /home/user/mcp-connect || { log "mcp-connect directory missing"; exit 1; }
+    cat <<ENVFILE > .env
 # Quote values so dotenv won't treat # as comment
 AUTH_TOKEN="${AUTH_TOKEN}"
 PORT="${PORT}"
@@ -54,28 +56,97 @@ HOST="${HOST}"
 LOG_LEVEL="info"
 ENVFILE
 
-log "Node.js / npm versions:"
-node -v || log "node not found"
-npm -v || log "npm not found"
+    log "Node.js / npm versions:"
+    node -v || log "node not found"
+    npm -v || log "npm not found"
 
-FORCE_INSTALL=${NPM_CI_ALWAYS:-0}
-if [ -f package.json ]; then
-    if [ "$FORCE_INSTALL" = "1" ]; then
-        log "FORCE_INSTALL enabled: running npm ci"
-        npm ci --no-audit || npm install --no-audit || { log "npm install failed"; exit 1; }
-    elif [ ! -d node_modules ]; then
-        log "node_modules missing: installing deps"
-        npm ci --no-audit || npm install --no-audit || { log "npm install failed"; exit 1; }
-    elif [ package-lock.json -nt node_modules ] || [ package.json -nt node_modules ]; then
-        log "package files newer than node_modules: re-installing deps"
-        npm ci --no-audit || npm install --no-audit || { log "npm install failed"; exit 1; }
+    FORCE_INSTALL=${NPM_CI_ALWAYS:-0}
+    if [ -f package.json ]; then
+        if [ "$FORCE_INSTALL" = "1" ]; then
+            log "FORCE_INSTALL enabled: running npm ci"
+            npm ci --no-audit || npm install --no-audit || { log "npm install failed"; exit 1; }
+        elif [ ! -d node_modules ]; then
+            log "node_modules missing: installing deps"
+            npm ci --no-audit || npm install --no-audit || { log "npm install failed"; exit 1; }
+        elif [ package-lock.json -nt node_modules ] || [ package.json -nt node_modules ]; then
+            log "package files newer than node_modules: re-installing deps"
+            npm ci --no-audit || npm install --no-audit || { log "npm install failed"; exit 1; }
+        else
+            log "node_modules present and up-to-date; skipping npm install"
+        fi
     else
-        log "node_modules present and up-to-date; skipping npm install"
+        log "package.json missing; cannot install dependencies"
+        exit 1
     fi
-else
-    log "package.json missing; cannot install dependencies"
-    exit 1
+}
+
+# If HEADLESS is enabled, run a lightweight startup and skip GUI entirely
+if [ "${HEADLESS}" = "1" ] || [ "${HEADLESS}" = "true" ]; then
+    log "HEADLESS mode: starting only nginx + mcp-connect"
+    prepare_mcp_env
+
+    # nginx proxy
+    log "Ensuring nginx reverse proxy is running (headless)"
+    if pgrep -x nginx >/dev/null 2>&1; then
+        log "nginx already running"
+        NGINX_PID=$(pgrep -x nginx | head -n 1)
+    else
+        sudo nginx -g 'daemon off;' &
+        NGINX_PID=$!
+    fi
+
+    # MCP-connect
+    log "Ensuring MCP-connect server is running on port ${PORT} (headless)"
+    if curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/health" | grep -q '^200$'; then
+        log "mcp-connect already healthy on port ${PORT}"
+        MCP_PID=""
+    else
+        npm run start > "${LOG_DIR}/mcp.log" 2>&1 &
+        MCP_PID=$!
+        echo ${MCP_PID} > "${LOG_DIR}/mcp.pid"
+    fi
+
+    log "Waiting for mcp-connect to become healthy (headless)..."
+    code=""
+    for _ in $(seq 1 30); do
+        code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/health" || true)
+        if [ "$code" = "200" ]; then
+            log "mcp-connect is healthy (HTTP 200)"
+            break
+        fi
+        sleep 2
+    done
+
+    if [ "$code" != "200" ]; then
+        log "mcp-connect failed to become healthy (last code: $code)"
+        log "--- tail nginx error.log ---"
+        sudo tail -n 50 /var/log/nginx/error.log 2>/dev/null || true
+        exit 1
+    fi
+
+    cleanup() {
+        log "Shutting down services (headless)..."
+        if [ -n "${MCP_PID:-}" ] && kill -0 "${MCP_PID}" >/dev/null 2>&1; then
+            kill "${MCP_PID}" 2>/dev/null || true
+        fi
+        if [ -n "${NGINX_PID:-}" ] && kill -0 "${NGINX_PID}" >/dev/null 2>&1; then
+            sudo kill "${NGINX_PID}" 2>/dev/null || true
+        fi
+    }
+    trap cleanup SIGTERM SIGINT
+
+    if [ -n "${MCP_PID:-}" ]; then
+        wait "${MCP_PID}"
+    else
+        while true; do
+            sleep 3600
+        done
+    fi
+    exit 0
 fi
+
+# Prepare MCP env and dependencies (GUI mode)
+prepare_mcp_env
 
 # Virtual display components ---------------------------------------------------
 DISPLAY_NUM=${XVFB_DISPLAY#:}
@@ -460,3 +531,5 @@ else
         sleep 3600
     done
 fi
+# Virtual display components ---------------------------------------------------
+# (GUI mode only; HEADLESS already exited above)

@@ -7,8 +7,27 @@ from template import make_template
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build E2B template (dev variant)")
-    parser.add_argument("--dockerfile", default="e2b.Dockerfile", help="Relative or absolute path to Dockerfile (default: e2b.Dockerfile)")
-    parser.add_argument("--alias", default="mcp-dev-novnc", help="Template alias to register (default: mcp-dev-gui)")
+    # Variant convenience selector: maps to known Dockerfiles in deploy/e2b
+    parser.add_argument(
+        "--variant",
+        choices=["full", "simple", "minimal"],
+        default="full",
+        help=(
+            "Convenience selector for template Dockerfile: "
+            "full=e2b.Dockerfile (GUI + noVNC), simple=e2b.Dockerfile.simple (headless Chrome, no X/noVNC), "
+            "minimal=e2b.Dockerfile.minimal (no X/noVNC, fastest)"
+        ),
+    )
+    parser.add_argument(
+        "--dockerfile",
+        default=None,
+        help="Relative or absolute path to Dockerfile (overrides --variant if provided)"
+    )
+    parser.add_argument(
+        "--alias",
+        default=None,
+        help="Template alias to register (default varies by --variant)"
+    )
     parser.add_argument("--cpu", type=int, default=2, help="CPU count to allocate during build (default: 2)")
     parser.add_argument("--memory-mb", type=int, default=2048, help="Memory in MB to allocate during build (default: 2048)")
     parser.add_argument("--skip-cache", action="store_true", help="Skip build cache (default: use cache)")
@@ -17,7 +36,23 @@ def parse_args() -> argparse.Namespace:
 
 async def main():
     args = parse_args()
-    tmpl = make_template(args.dockerfile)
+    # Resolve dockerfile from variant unless explicitly provided
+    variant_to_df = {
+        "full": "e2b.Dockerfile",
+        "simple": "e2b.Dockerfile.simple",
+        "minimal": "e2b.Dockerfile.minimal",
+    }
+    chosen_df = args.dockerfile or variant_to_df[args.variant]
+    tmpl = make_template(chosen_df)
+
+    # Resolve alias default based on variant if not provided
+    if not args.alias:
+        variant_to_alias = {
+            "full": "mcp-dev-gui",
+            "simple": "mcp-dev-simple",
+            "minimal": "mcp-dev-minimal",
+        }
+        args.alias = variant_to_alias[args.variant]
 
     def log_handler(entry: LogEntry) -> None:
         # E2B's Dockerfile parser sometimes emits noisy warnings like
@@ -39,6 +74,7 @@ async def main():
 
     print("✅ Template built successfully!")
     print(f"🏷️  Template Alias: {args.alias}")
+    print(f"📄  Dockerfile: {chosen_df}")
     print("\nTo list templates:")
     print("  e2b template list")
     print("To show a specific template:")
