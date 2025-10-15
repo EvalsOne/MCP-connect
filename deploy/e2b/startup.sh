@@ -151,8 +151,8 @@ CHROME_LAUNCH_PID=$!
       read SCREEN_W SCREEN_H < <(xdotool getdisplaygeometry)
       xdotool windowmove "$WID" 0 0 || true
       xdotool windowsize "$WID" "$SCREEN_W" "$SCREEN_H" || true
-      # Also request fullscreen via wmctrl as a fallback
-      wmctrl -x -r google-chrome.Google-chrome -b add,fullscreen >/dev/null 2>&1 || true
+      # Prefer maximize (not fullscreen) so panels stay visible
+      wmctrl -x -r google-chrome.Google-chrome -b add,maximized_vert,maximized_horz >/dev/null 2>&1 || true
       break
     fi
     sleep 0.5
@@ -220,6 +220,21 @@ pkill -x tint2 >/dev/null 2>&1 || true
 nohup tint2 > "${LOG_DIR}/tint2.log" 2>&1 &
 TINT2_PID=$!
 echo ${TINT2_PID} > "${LOG_DIR}/tint2.pid"
+
+# If tint2 fails to start, re-enable Fluxbox toolbar as a fallback
+(
+  sleep 1
+  if ! kill -0 ${TINT2_PID} >/dev/null 2>&1; then
+    if [ -f "${FLUXBOX_DIR}/init" ]; then
+      if grep -q '^session.screen0.toolbar.visible:' "${FLUXBOX_DIR}/init" 2>/dev/null; then
+        sed -i 's/^session.screen0.toolbar.visible:.*/session.screen0.toolbar.visible:  true/' "${FLUXBOX_DIR}/init" || true
+      else
+        echo 'session.screen0.toolbar.visible:  true' >> "${FLUXBOX_DIR}/init"
+      fi
+      pkill -HUP -x fluxbox >/dev/null 2>&1 || true
+    fi
+  fi
+) &
 
 if [ -n "${VNC_PASSWORD}" ]; then
     log "Configuring VNC password file"
@@ -321,7 +336,7 @@ else
     echo ${CHROME_PID} > "${LOG_DIR}/chrome.pid"
     (
         for i in $(seq 1 10); do
-            if wmctrl -x -r google-chrome.Google-chrome -b add,fullscreen >/dev/null 2>&1; then
+            if wmctrl -x -r google-chrome.Google-chrome -b add,maximized_vert,maximized_horz >/dev/null 2>&1; then
                 break
             fi
             sleep 1

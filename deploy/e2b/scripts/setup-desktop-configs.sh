@@ -119,6 +119,8 @@ panel_margin = 0 0
 panel_padding = 8 4 8
 panel_background_id = 0
 wm_menu = 1
+panel_layer = top
+panel_dock = 1
 
 rounded = 6
 border_width = 1
