@@ -77,6 +77,22 @@ fi
 DISPLAY_NUM=${XVFB_DISPLAY#:}
 DISPLAY_NUM=${DISPLAY_NUM%%.*}
 DISPLAY_SOCKET="/tmp/.X11-unix/X${DISPLAY_NUM}"
+XAUTH_FILE=${XAUTH_FILE:-/home/user/.Xauthority}
+
+# Prepare Xauthority so both Xvfb and x11vnc can authenticate to the same display
+log "Preparing Xauthority for display ${XVFB_DISPLAY}"
+mkdir -p "$(dirname "${XAUTH_FILE}")"
+# Generate a 16-byte hex cookie (fallback chain: mcookie -> openssl -> /dev/urandom)
+COOKIE="$( (mcookie 2>/dev/null) || (openssl rand -hex 16 2>/dev/null) || (dd if=/dev/urandom bs=16 count=1 2>/dev/null | xxd -p -c 32) )"
+if [ -z "${COOKIE}" ]; then
+    log "ERROR: failed to generate Xauthority cookie"
+    exit 1
+fi
+# Ensure we replace any existing cookie for this display
+xauth -f "${XAUTH_FILE}" remove "${XVFB_DISPLAY}" >/dev/null 2>&1 || true
+xauth -f "${XAUTH_FILE}" add "${XVFB_DISPLAY}" . "${COOKIE}" || { log "failed to write cookie to ${XAUTH_FILE}"; exit 1; }
+chmod 600 "${XAUTH_FILE}" || true
+export XAUTHORITY="${XAUTH_FILE}"
 
 log "Cleaning up stale Xvfb state for display ${XVFB_DISPLAY}"
 pkill -f -- "Xvfb ${XVFB_DISPLAY}" >/dev/null 2>&1 || true
@@ -85,7 +101,7 @@ mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix || true
 
 log "Ensuring Xvfb is running on ${XVFB_DISPLAY}"
-nohup Xvfb "${XVFB_DISPLAY}" -screen 0 "${XVFB_RESOLUTION}" -nolisten tcp > "${LOG_DIR}/xvfb.log" 2>&1 &
+nohup Xvfb "${XVFB_DISPLAY}" -screen 0 "${XVFB_RESOLUTION}" -nolisten tcp -auth "${XAUTH_FILE}" > "${LOG_DIR}/xvfb.log" 2>&1 &
 XVFB_PID=$!
 echo ${XVFB_PID} > "${LOG_DIR}/xvfb.pid"
 
@@ -210,8 +226,8 @@ fi
 # Dynamic tuning parameters ----------------------------------------------------
 X11VNC_WAIT=${X11VNC_WAIT:-20}          # milliseconds to wait between screen polls
 X11VNC_DEFER=${X11VNC_DEFER:-20}        # defer update batching (ms)
-X11VNC_COMPRESSION=${X11VNC_COMPRESSION:-9}  # tight compression level (0-9)
-X11VNC_QUALITY=${X11VNC_QUALITY:-5}     # jpeg quality (0-9)
+X11VNC_COMPRESSION=${X11VNC_COMPRESSION:-9}  # deprecated in some builds; kept for env parity
+X11VNC_QUALITY=${X11VNC_QUALITY:-5}     # deprecated in some builds; kept for env parity
 X11VNC_EXTRA=${X11VNC_EXTRA:-}          # extra raw args, space separated
 
 X11VNC_TUNING_OPTS=(
@@ -220,9 +236,6 @@ X11VNC_TUNING_OPTS=(
     -noxdamage \
     -ncache_cr \
     -ncache 10 \
-    -tightfilexfer \
-    -tightquality "${X11VNC_QUALITY}" \
-    -tightcompresslevel "${X11VNC_COMPRESSION}" \
 )
 
 if [ -n "${X11VNC_EXTRA}" ]; then
@@ -238,12 +251,26 @@ nohup x11vnc -display "${XVFB_DISPLAY}" \
     -localhost \
     -forever \
     -shared \
+    -auth "${XAUTH_FILE}" \
         "${X11VNC_TUNING_OPTS[@]}" \
     "${X11VNC_AUTH_OPTS[@]}" \
     -o "${LOG_DIR}/x11vnc.log" \
     > /dev/null 2>&1 &
 X11VNC_PID=$!
 echo ${X11VNC_PID} > "${LOG_DIR}/x11vnc.pid"
+
+# Quick readiness probe for x11vnc port to avoid silent failures
+for i in $(seq 1 10); do
+    if nc -z 127.0.0.1 "${VNC_PORT}" >/dev/null 2>&1; then
+        break
+    fi
+    sleep 0.5
+done
+if ! nc -z 127.0.0.1 "${VNC_PORT}" >/dev/null 2>&1; then
+    log "WARNING: x11vnc not listening on port ${VNC_PORT}" 
+    log "--- tail x11vnc.log ---"
+    tail -n 50 "${LOG_DIR}/x11vnc.log" 2>/dev/null || true
+fi
 
 log "Ensuring noVNC web server is running on port ${NOVNC_PORT}"
 pkill -f -- "websockify.*${NOVNC_PORT}" >/dev/null 2>&1 || true

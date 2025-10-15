@@ -212,13 +212,18 @@ class E2BSandboxManager:
 
             # Derive displayed port for nginx based on the chosen URL
             nginx_port = 443 if public_url.startswith("https") else 80
-            novnc_url = f"{public_url.rstrip('/')}{self.config.novnc_path}vnc.html"
+            # Append path parameter so noVNC uses the root /websockify endpoint (works with default nginx)
+            novnc_url = f"{public_url.rstrip('/')}{self.config.novnc_path}vnc.html?autoconnect=1"
             # Derive websocket (noVNC/websockify) URL (public_url already includes scheme)
             ws_scheme = "wss" if public_url.startswith("https") else "ws"
             # public_url like https://host; we append /websockify
             websocket_url = f"{ws_scheme}://{public_url.split('://', 1)[1].rstrip('/')}/websockify"
             # Resolve effective VNC password (custom if provided else auth_token)
-            vnc_password_resolved = self.config.vnc_password if self.config.vnc_password else self.config.auth_token
+            vnc_password_resolved = (
+                str(self.config.vnc_password).strip()
+                if (self.config.vnc_password and str(self.config.vnc_password).strip())
+                else self.config.auth_token
+            )
 
             result = {
                 "success": True,
@@ -256,7 +261,9 @@ class E2BSandboxManager:
                     "vnc": {
                         "port": self.config.vnc_port,
                         "status": "running",
-                        "password_hint": "auth_token" if not self.config.vnc_password else "custom",
+                        "password_hint": (
+                            "custom" if (self.config.vnc_password and str(self.config.vnc_password).strip()) else "auth_token"
+                        ),
                         "resolved_password": vnc_password_resolved,
                     },
                     "novnc": {
@@ -265,8 +272,10 @@ class E2BSandboxManager:
                         "port": self.config.novnc_port,
                         "path": self.config.novnc_path,
                         "status": "running",
-                        "requires_password": True,
-                        "password_hint": "auth_token" if not self.config.vnc_password else "custom",
+                        "requires_password": bool(vnc_password_resolved),
+                        "password_hint": (
+                            "custom" if (self.config.vnc_password and str(self.config.vnc_password).strip()) else "auth_token"
+                        ),
                         "resolved_password": vnc_password_resolved,
                     },
                 },
@@ -324,10 +333,11 @@ class E2BSandboxManager:
         xvfb_width, xvfb_height = self._parse_resolution(xvfb_resolution)
         vnc_port = str(self.config.vnc_port)
         novnc_port = str(self.config.novnc_port)
-        if self.config.vnc_password is None:
-            vnc_password = self.config.auth_token
+        # Treat empty string or whitespace as unset; default to AUTH_TOKEN
+        if self.config.vnc_password and str(self.config.vnc_password).strip():
+            vnc_password = str(self.config.vnc_password).strip()
         else:
-            vnc_password = self.config.vnc_password
+            vnc_password = self.config.auth_token
         novnc_webroot = self.config.novnc_webroot
 
         envs = {
