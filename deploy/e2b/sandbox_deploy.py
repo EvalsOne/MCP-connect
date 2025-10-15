@@ -211,11 +211,11 @@ class E2BSandboxManager:
             # Prepare response
             sandbox_headers = sandbox.connection_config.sandbox_headers or {}
 
-            # Resolve effective VNC password (custom if provided else auth_token)
+            # Resolve effective VNC password: use custom if provided, otherwise no password
             vnc_password_resolved = (
                 str(self.config.vnc_password).strip()
                 if (self.config.vnc_password and str(self.config.vnc_password).strip())
-                else self.config.auth_token
+                else ""
             )
             # Derive displayed port for nginx based on the chosen URL
             nginx_port = 443 if public_url.startswith("https") else 80
@@ -269,7 +269,7 @@ class E2BSandboxManager:
                         "port": self.config.vnc_port,
                         "status": "running",
                         "password_hint": (
-                            "custom" if (self.config.vnc_password and str(self.config.vnc_password).strip()) else "auth_token"
+                            "custom" if (self.config.vnc_password and str(self.config.vnc_password).strip()) else "none"
                         ),
                         "resolved_password": vnc_password_resolved,
                     },
@@ -281,7 +281,7 @@ class E2BSandboxManager:
                         "status": "running",
                         "requires_password": bool(vnc_password_resolved),
                         "password_hint": (
-                            "custom" if (self.config.vnc_password and str(self.config.vnc_password).strip()) else "auth_token"
+                            "custom" if (self.config.vnc_password and str(self.config.vnc_password).strip()) else "none"
                         ),
                         "resolved_password": vnc_password_resolved,
                     },
@@ -340,11 +340,11 @@ class E2BSandboxManager:
         xvfb_width, xvfb_height = self._parse_resolution(xvfb_resolution)
         vnc_port = str(self.config.vnc_port)
         novnc_port = str(self.config.novnc_port)
-        # Treat empty string or whitespace as unset; default to AUTH_TOKEN
+        # Treat empty string or whitespace as unset; when unset, do not configure a VNC password
         if self.config.vnc_password and str(self.config.vnc_password).strip():
             vnc_password = str(self.config.vnc_password).strip()
         else:
-            vnc_password = self.config.auth_token
+            vnc_password = ""
         novnc_webroot = self.config.novnc_webroot
 
         envs = {
@@ -355,6 +355,7 @@ class E2BSandboxManager:
             "NPM_CI_ALWAYS": os.getenv("NPM_CI_ALWAYS", "0"),
         }
 
+        # Base env for services
         service_envs = {
             **envs,
             "DISPLAY": display,
@@ -366,13 +367,11 @@ class E2BSandboxManager:
             "NOVNC_PORT": novnc_port,
             "NOVNC_WEBROOT": novnc_webroot,
             "VNC_PASSWORD": vnc_password,
-            # Optional x11vnc tuning knobs passed through if user sets them in outer env
-            "X11VNC_WAIT": os.getenv("X11VNC_WAIT", "20"),
-            "X11VNC_DEFER": os.getenv("X11VNC_DEFER", "20"),
-            "X11VNC_COMPRESSION": os.getenv("X11VNC_COMPRESSION", "9"),
-            "X11VNC_QUALITY": os.getenv("X11VNC_QUALITY", "5"),
-            "X11VNC_EXTRA": os.getenv("X11VNC_EXTRA", ""),
         }
+        # Only pass optional x11vnc tuning envs if the outer environment explicitly set them.
+        for key in ("X11VNC_WAIT", "X11VNC_DEFER", "X11VNC_COMPRESSION", "X11VNC_QUALITY", "X11VNC_EXTRA"):
+            if key in os.environ and str(os.environ.get(key, "")).strip() != "":
+                service_envs[key] = os.environ[key]
 
         logger.info("Configuring MCP environment variables inside sandbox...")
         # Quote values so dotenv doesn't treat # as comment

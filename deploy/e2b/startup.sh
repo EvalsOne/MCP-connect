@@ -6,6 +6,7 @@
 set -euo pipefail
 
 LOG_DIR=/home/user
+STARTUP_VERSION="v2025-10-15-01"
 DESKTOP_DIR=/home/user/Desktop
 CONFIG_ROOT=/home/user/.config
 FLUXBOX_DIR=/home/user/.fluxbox
@@ -19,6 +20,7 @@ log() {
 }
 
 log "Starting E2B MCP Sandbox..."
+log "Startup script version: ${STARTUP_VERSION}"
 
 AUTH_TOKEN=${AUTH_TOKEN:-demo#e2b}
 PORT=${PORT:-3000}
@@ -270,6 +272,16 @@ fi
 
 log "Ensuring x11vnc is running on port ${VNC_PORT}"
 pkill -f -- "x11vnc.*:${VNC_PORT}" >/dev/null 2>&1 || true
+# Log the effective x11vnc command (without revealing sensitive values)
+{
+    printf '%s %s' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "Launching x11vnc with: x11vnc -display ${XVFB_DISPLAY} -rfbport ${VNC_PORT} -localhost -forever -shared -auth ${XAUTH_FILE} ";
+    printf '%s ' "${X11VNC_TUNING_OPTS[@]}" 2>/dev/null || true;
+    printf '\n';
+} >> "${LOG_DIR}/x11vnc.log" 2>/dev/null || true
+
+# Guard against external envs that inject unsupported libvncserver flags
+unset X11VNC_OPTS X11VNC_OPTIONS X11VNC_ARGS X11VNC_QUALITY X11VNC_COMPRESSION TIGHT_QUALITY TIGHT_COMPRESSLEVEL VNC_QUALITY VNC_COMPRESSLEVEL || true
+
 nohup x11vnc -display "${XVFB_DISPLAY}" \
     -rfbport "${VNC_PORT}" \
     -localhost \
@@ -294,6 +306,27 @@ if ! nc -z 127.0.0.1 "${VNC_PORT}" >/dev/null 2>&1; then
     log "WARNING: x11vnc not listening on port ${VNC_PORT}" 
     log "--- tail x11vnc.log ---"
     tail -n 50 "${LOG_DIR}/x11vnc.log" 2>/dev/null || true
+    # Retry with minimal flags to avoid crashes from unsupported options
+    pkill -f -- "x11vnc.*:${VNC_PORT}" >/dev/null 2>&1 || true
+    sleep 0.5
+    log "Retrying x11vnc with minimal flags..."
+    nohup x11vnc -display "${XVFB_DISPLAY}" \
+        -rfbport "${VNC_PORT}" \
+        -localhost \
+        -forever \
+        -shared \
+        -auth "${XAUTH_FILE}" \
+        "${X11VNC_AUTH_OPTS[@]}" \
+        -o "${LOG_DIR}/x11vnc.log" \
+        > /dev/null 2>&1 &
+    X11VNC_PID=$!
+    echo ${X11VNC_PID} > "${LOG_DIR}/x11vnc.pid"
+    sleep 1
+    if nc -z 127.0.0.1 "${VNC_PORT}" >/dev/null 2>&1; then
+        log "x11vnc recovered with minimal flags"
+    else
+        log "x11vnc still not listening on port ${VNC_PORT} after retry"
+    fi
 fi
 
 log "Ensuring noVNC web server is running on port ${NOVNC_PORT}"

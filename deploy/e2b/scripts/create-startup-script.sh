@@ -145,6 +145,8 @@ fi
 
 log "Ensuring x11vnc is running on port ${VNC_PORT}"
 pkill -f -- "x11vnc.*:${VNC_PORT}" >/dev/null 2>&1 || true
+# Guard against external envs that inject unsupported libvncserver flags
+unset X11VNC_OPTS X11VNC_OPTIONS X11VNC_ARGS X11VNC_QUALITY X11VNC_COMPRESSION TIGHT_QUALITY TIGHT_COMPRESSLEVEL VNC_QUALITY VNC_COMPRESSLEVEL || true
 nohup x11vnc -display "${XVFB_DISPLAY}" \
     -rfbport "${VNC_PORT}" \
     -localhost \
@@ -164,6 +166,29 @@ nohup websockify --web="${NOVNC_WEBROOT}" \
     > "${LOG_DIR}/novnc.log" 2>&1 &
 NOVNC_PID=$!
 echo ${NOVNC_PID} > "${LOG_DIR}/novnc.pid"
+
+# Minimal readiness check + auto-retry x11vnc with safe flags
+for i in $(seq 1 10); do
+  if nc -z 127.0.0.1 "${VNC_PORT}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.5
+done
+if ! nc -z 127.0.0.1 "${VNC_PORT}" >/dev/null 2>&1; then
+  echo "x11vnc not listening on ${VNC_PORT}, retrying with minimal flags" >> "${LOG_DIR}/x11vnc.log"
+  pkill -f -- "x11vnc.*:${VNC_PORT}" >/dev/null 2>&1 || true
+  sleep 0.5
+  nohup x11vnc -display "${XVFB_DISPLAY}" \
+      -rfbport "${VNC_PORT}" \
+      -localhost \
+      -forever \
+      -shared \
+      "${X11VNC_AUTH_OPTS[@]}" \
+      -o "${LOG_DIR}/x11vnc.log" \
+      > /dev/null 2>&1 &
+  X11VNC_PID=$!
+  echo ${X11VNC_PID} > "${LOG_DIR}/x11vnc.pid"
+fi
 
 # Chrome (non-headless) --------------------------------------------------------
 log "Ensuring Chrome (DevTools) is running on display ${XVFB_DISPLAY}"
