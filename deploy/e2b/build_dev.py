@@ -20,7 +20,13 @@ async def main():
     tmpl = make_template(args.dockerfile)
 
     def log_handler(entry: LogEntry) -> None:
-        print(f"[{entry.timestamp.isoformat()}] {entry.level.upper()}: {entry.message}")
+        # E2B's Dockerfile parser sometimes emits noisy warnings like
+        # "Unsupported instruction: COMMENT" for standard '#' comments.
+        # These do not affect the build and can be safely ignored.
+        msg = (entry.message or "").strip()
+        if msg.startswith("Unsupported instruction: COMMENT"):
+            return
+        print(f"[{entry.timestamp.isoformat()}] {entry.level.upper()}: {msg}")
 
     await AsyncTemplate.build(
         tmpl,
