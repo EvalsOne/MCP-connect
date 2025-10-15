@@ -516,6 +516,16 @@ class E2BSandboxManager:
         local_wrapper = os.path.join(repo_dir, "chrome-devtools-wrapper.sh")
         local_servers = os.path.join(repo_dir, "servers.json")
 
+        # Optional: prefer fetching assets from a remote repo (always-latest) inside the sandbox
+        # Controlled by environment variables so callers can opt-in without code changes:
+        #   E2B_FETCH_REMOTE=1 to enable
+        #   E2B_REMOTE_BASE=https://raw.githubusercontent.com/<org>/<repo>/<branch>/deploy/e2b
+        fetch_remote = os.getenv("E2B_FETCH_REMOTE", "0").strip() in ("1", "true", "TRUE")
+        remote_base = os.getenv(
+            "E2B_REMOTE_BASE",
+            "https://raw.githubusercontent.com/EvalsOne/MCP-bridge/dev_streamable_http/deploy/e2b",
+        )
+
         # Try to load resources from packaged e2b_mcp_sandbox if not present next to this file
         def _resource_text(pkg: str, name: str) -> Optional[str]:
             try:
@@ -528,64 +538,105 @@ class E2BSandboxManager:
             return None
 
         startup_contents: Optional[str] = None
-        if os.path.isfile(local_startup):
-            with open(local_startup, "r", encoding="utf-8") as handle:
-                startup_contents = handle.read()
-        if startup_contents is None:
-            # try packaged fallback from this package path
-            startup_contents = _resource_text('deploy.e2b', 'startup.sh')
-            if startup_contents:
-                logger.info("Using packaged startup.sh from deploy.e2b")
-        if startup_contents is None:
-            logger.warning("Local startup.sh not found at %s and no packaged resource; cannot upload", local_startup)
-        else:
+        remote_ok = False
+        if fetch_remote:
+            try:
+                logger.info("Fetching startup.sh from remote: %s", remote_base)
+                cmd = (
+                    f"bash -lc 'curl -fsSL {remote_base}/startup.sh -o /home/user/startup.sh && chmod +x /home/user/startup.sh && echo OK'"
+                )
+                out = await self._run(sandbox, cmd, background=False, cwd="/home/user")
+                if out and "OK" in (out.stdout or ""):
+                    startup_exists = True
+                    remote_ok = True
+            except Exception as e:
+                logger.warning("Remote fetch of startup.sh failed; falling back to packaged/local. %s", str(e))
 
-            logger.info("Uploading startup.sh to sandbox (overwriting existing copy)")
-            await self._write(sandbox, "/home/user/startup.sh", startup_contents)
-            startup_exists = True
+        if not remote_ok:
+            if os.path.isfile(local_startup):
+                with open(local_startup, "r", encoding="utf-8") as handle:
+                    startup_contents = handle.read()
+            if startup_contents is None:
+                # try packaged fallback from this package path
+                startup_contents = _resource_text('deploy.e2b', 'startup.sh')
+                if startup_contents:
+                    logger.info("Using packaged startup.sh from deploy.e2b")
+            if startup_contents is None:
+                logger.warning("Local startup.sh not found at %s and no packaged resource; cannot upload", local_startup)
+            else:
+                logger.info("Uploading startup.sh to sandbox (overwriting existing copy)")
+                await self._write(sandbox, "/home/user/startup.sh", startup_contents)
+                startup_exists = True
 
         wrapper_contents: Optional[str] = None
-        if os.path.isfile(local_wrapper):
-            with open(local_wrapper, "r", encoding="utf-8") as handle:
-                wrapper_contents = handle.read()
-        if wrapper_contents is None:
-            wrapper_contents = _resource_text('deploy.e2b', 'chrome-devtools-wrapper.sh')
-            if wrapper_contents:
-                logger.info("Using packaged chrome-devtools-wrapper.sh from deploy.e2b")
-        if wrapper_contents is None:
-            logger.warning("chrome-devtools wrapper script missing at %s and no packaged resource", local_wrapper)
-        else:
-            logger.info("Uploading chrome-devtools wrapper script to sandbox")
-            await self._write(sandbox, "/home/user/chrome-devtools-wrapper.sh", wrapper_contents)
+        wrapper_remote_ok = False
+        if fetch_remote:
             try:
-                await self._run(sandbox, "bash -lc 'chmod +x /home/user/chrome-devtools-wrapper.sh'", background=False, cwd="/home/user")
-            except CommandExitException as e:
-                logger.warning("Failed to chmod chrome-devtools-wrapper.sh: %s", getattr(e, 'stderr', '') or str(e))
-
-        servers_contents: Optional[str] = None
-        if os.path.isfile(local_servers):
-            with open(local_servers, "r", encoding="utf-8") as handle:
-                servers_contents = handle.read()
-        if servers_contents is None:
-            # also try root-level mcp-servers.json as a source of truth
-            try:
-                root_servers = os.path.abspath(os.path.join(repo_dir, os.pardir, os.pardir, "mcp-servers.json"))
-                if os.path.isfile(root_servers):
-                    with open(root_servers, "r", encoding="utf-8") as handle:
-                        servers_contents = handle.read()
-                    logger.info("Using root mcp-servers.json for sandbox config")
+                logger.info("Fetching chrome-devtools-wrapper.sh from remote: %s", remote_base)
+                cmd = (
+                    f"bash -lc 'curl -fsSL {remote_base}/chrome-devtools-wrapper.sh -o /home/user/chrome-devtools-wrapper.sh && chmod +x /home/user/chrome-devtools-wrapper.sh && echo OK'"
+                )
+                out = await self._run(sandbox, cmd, background=False, cwd="/home/user")
+                if out and "OK" in (out.stdout or ""):
+                    wrapper_remote_ok = True
             except Exception:
                 pass
-        if servers_contents is None:
-            servers_contents = _resource_text('deploy.e2b', 'servers.json')
-            if servers_contents:
-                logger.info("Using packaged servers.json from deploy.e2b")
-        if servers_contents is not None:
-            logger.info("Updating MCP servers.json inside sandbox")
-            await self._run(sandbox, "mkdir -p /home/user/.config/mcp", background=False, cwd="/home/user")
-            await self._write(sandbox, "/home/user/.config/mcp/servers.json", servers_contents)
-        else:
-            logger.warning("servers.json not found at %s and no packaged/root alternative", local_servers)
+        if not wrapper_remote_ok:
+            if os.path.isfile(local_wrapper):
+                with open(local_wrapper, "r", encoding="utf-8") as handle:
+                    wrapper_contents = handle.read()
+            if wrapper_contents is None:
+                wrapper_contents = _resource_text('deploy.e2b', 'chrome-devtools-wrapper.sh')
+                if wrapper_contents:
+                    logger.info("Using packaged chrome-devtools-wrapper.sh from deploy.e2b")
+            if wrapper_contents is None:
+                logger.warning("chrome-devtools wrapper script missing at %s and no packaged resource", local_wrapper)
+            else:
+                logger.info("Uploading chrome-devtools wrapper script to sandbox")
+                await self._write(sandbox, "/home/user/chrome-devtools-wrapper.sh", wrapper_contents)
+                try:
+                    await self._run(sandbox, "bash -lc 'chmod +x /home/user/chrome-devtools-wrapper.sh'", background=False, cwd="/home/user")
+                except CommandExitException as e:
+                    logger.warning("Failed to chmod chrome-devtools-wrapper.sh: %s", getattr(e, 'stderr', '') or str(e))
+
+        servers_contents: Optional[str] = None
+        servers_remote_ok = False
+        if fetch_remote:
+            try:
+                logger.info("Fetching servers.json from remote: %s", remote_base)
+                cmd = (
+                    f"bash -lc 'curl -fsSL {remote_base}/servers.json -o /home/user/.config/mcp/servers.json && echo OK'"
+                )
+                await self._run(sandbox, "mkdir -p /home/user/.config/mcp", background=False, cwd="/home/user")
+                out = await self._run(sandbox, cmd, background=False, cwd="/home/user")
+                if out and "OK" in (out.stdout or ""):
+                    servers_remote_ok = True
+            except Exception:
+                pass
+        if not servers_remote_ok:
+            if os.path.isfile(local_servers):
+                with open(local_servers, "r", encoding="utf-8") as handle:
+                    servers_contents = handle.read()
+            if servers_contents is None:
+                # also try root-level mcp-servers.json as a source of truth
+                try:
+                    root_servers = os.path.abspath(os.path.join(repo_dir, os.pardir, os.pardir, "mcp-servers.json"))
+                    if os.path.isfile(root_servers):
+                        with open(root_servers, "r", encoding="utf-8") as handle:
+                            servers_contents = handle.read()
+                        logger.info("Using root mcp-servers.json for sandbox config")
+                except Exception:
+                    pass
+            if servers_contents is None:
+                servers_contents = _resource_text('deploy.e2b', 'servers.json')
+                if servers_contents:
+                    logger.info("Using packaged servers.json from deploy.e2b")
+            if servers_contents is not None:
+                logger.info("Updating MCP servers.json inside sandbox")
+                await self._run(sandbox, "mkdir -p /home/user/.config/mcp", background=False, cwd="/home/user")
+                await self._write(sandbox, "/home/user/.config/mcp/servers.json", servers_contents)
+            else:
+                logger.warning("servers.json not found at %s and no packaged/root alternative", local_servers)
 
         if startup_exists:
             try:
