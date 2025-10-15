@@ -10,6 +10,7 @@ import asyncio
 import argparse
 from typing import Optional, Dict, Any, Tuple, Callable, Type, Union
 from dataclasses import dataclass
+from urllib.parse import quote as _url_quote
 #############################
 # Sandbox client import logic
 #############################
@@ -210,20 +211,26 @@ class E2BSandboxManager:
             # Prepare response
             sandbox_headers = sandbox.connection_config.sandbox_headers or {}
 
-            # Derive displayed port for nginx based on the chosen URL
-            nginx_port = 443 if public_url.startswith("https") else 80
-            # Append path parameter so noVNC uses the root /websockify endpoint (works with default nginx)
-            novnc_url = f"{public_url.rstrip('/')}{self.config.novnc_path}vnc.html?autoconnect=1"
-            # Derive websocket (noVNC/websockify) URL (public_url already includes scheme)
-            ws_scheme = "wss" if public_url.startswith("https") else "ws"
-            # public_url like https://host; we append /websockify
-            websocket_url = f"{ws_scheme}://{public_url.split('://', 1)[1].rstrip('/')}/websockify"
             # Resolve effective VNC password (custom if provided else auth_token)
             vnc_password_resolved = (
                 str(self.config.vnc_password).strip()
                 if (self.config.vnc_password and str(self.config.vnc_password).strip())
                 else self.config.auth_token
             )
+            # Derive displayed port for nginx based on the chosen URL
+            nginx_port = 443 if public_url.startswith("https") else 80
+            # Build noVNC URL with autoconnect, explicit websocket path, and auto password (URL-encoded)
+            # Note: Including password in URL trades convenience for security; use only in trusted contexts.
+            encoded_pw = _url_quote(vnc_password_resolved, safe="") if vnc_password_resolved else ""
+            common_qs = "autoconnect=1&path=/websockify"
+            novnc_url = (
+                f"{public_url.rstrip('/')}{self.config.novnc_path}vnc.html?{common_qs}"
+                + (f"&password={encoded_pw}" if encoded_pw else "")
+            )
+            # Derive websocket (noVNC/websockify) URL (public_url already includes scheme)
+            ws_scheme = "wss" if public_url.startswith("https") else "ws"
+            # public_url like https://host; we append /websockify
+            websocket_url = f"{ws_scheme}://{public_url.split('://', 1)[1].rstrip('/')}/websockify"
 
             result = {
                 "success": True,

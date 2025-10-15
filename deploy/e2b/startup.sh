@@ -173,6 +173,15 @@ if [ -d "${DESKTOP_TEMPLATE_DIR}/tint2" ]; then
     cp -rf "${DESKTOP_TEMPLATE_DIR}/tint2/." "${TINT2_CONFIG_DIR}/"
 fi
 
+# Ensure Fluxbox toolbar is hidden to avoid double panels when using tint2
+if [ -f "${FLUXBOX_DIR}/init" ]; then
+  if grep -q '^session.screen0.toolbar.visible:' "${FLUXBOX_DIR}/init" 2>/dev/null; then
+    sed -i 's/^session.screen0.toolbar.visible:.*/session.screen0.toolbar.visible:  false/' "${FLUXBOX_DIR}/init" || true
+  else
+    echo 'session.screen0.toolbar.visible:  false' >> "${FLUXBOX_DIR}/init"
+  fi
+fi
+
 cat <<'DESKTOP_ENTRY' > "${DESKTOP_DIR}/Chrome.desktop"
 [Desktop Entry]
 Name=Chrome
