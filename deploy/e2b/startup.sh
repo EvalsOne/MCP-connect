@@ -207,6 +207,30 @@ else
     X11VNC_AUTH_OPTS=("-nopw")
 fi
 
+# Dynamic tuning parameters ----------------------------------------------------
+X11VNC_WAIT=${X11VNC_WAIT:-20}          # milliseconds to wait between screen polls
+X11VNC_DEFER=${X11VNC_DEFER:-20}        # defer update batching (ms)
+X11VNC_COMPRESSION=${X11VNC_COMPRESSION:-9}  # tight compression level (0-9)
+X11VNC_QUALITY=${X11VNC_QUALITY:-5}     # jpeg quality (0-9)
+X11VNC_EXTRA=${X11VNC_EXTRA:-}          # extra raw args, space separated
+
+X11VNC_TUNING_OPTS=(
+    -wait "${X11VNC_WAIT}" \
+    -defer "${X11VNC_DEFER}" \
+    -noxdamage \
+    -ncache_cr \
+    -ncache 10 \
+    -tightfilexfer \
+    -tightquality "${X11VNC_QUALITY}" \
+    -tightcompresslevel "${X11VNC_COMPRESSION}" \
+)
+
+if [ -n "${X11VNC_EXTRA}" ]; then
+    # shellcheck disable=SC2206
+    EXTRA_SPLIT=( ${X11VNC_EXTRA} )
+    X11VNC_TUNING_OPTS+=("${EXTRA_SPLIT[@]}")
+fi
+
 log "Ensuring x11vnc is running on port ${VNC_PORT}"
 pkill -f -- "x11vnc.*:${VNC_PORT}" >/dev/null 2>&1 || true
 nohup x11vnc -display "${XVFB_DISPLAY}" \
@@ -214,6 +238,7 @@ nohup x11vnc -display "${XVFB_DISPLAY}" \
     -localhost \
     -forever \
     -shared \
+        "${X11VNC_TUNING_OPTS[@]}" \
     "${X11VNC_AUTH_OPTS[@]}" \
     -o "${LOG_DIR}/x11vnc.log" \
     > /dev/null 2>&1 &

@@ -24,7 +24,7 @@
 
 ## 📖 什么是 MCP Connect？
 
-MCP Connect 是一个 HTTP 网关服务，让你可以通过 HTTP 方式调用使用 Stdio 通信协议的本地 MCP 服务器。
+MCP Connect 是一个 HTTP 网关服务，让你可以通过Streamable HTTP 方式调用使用 Stdio 通信协议的本地 MCP 服务器。
 
 ### 最新更新
 
@@ -47,18 +47,18 @@ MCP Connect 是一个 HTTP 网关服务，让你可以通过 HTTP 方式调用�
 
 | 特性 | 说明 |
 |------|------|
-| 🚀 **双模式支持** | 可使用 Streamable HTTP 或者经典 HTTP 桥接方式调用 |
+| 🚀 **双模式支持** | 可使用 Streamable HTTP 或者经典 HTTP 桥接方式调用本地Stdio协议的MCP服务器 |
 | 🔄 **Session管理** | 支持通过Session机制维护对话的连续性 |
 | 🔐 **安全防护** | Bearer Token 认证 + CORS 白名单 |
 | 🌐 **公网访问** | 内置 Ngrok 隧道，一键暴露外网 |
-| ☁️ **云端部署** | 一键部署到 E2B 云沙箱（安全隔离） |
+| ☁️ **云端部署** | 一键部署到 E2B 云沙箱 |
 ---
 
 ## 🚀 快速开始
 
 ### 前置要求
 
-- Node.js >= 20.0.0
+- Node.js >= 22.0.0 (推荐)
 - npm 或 yarn
 
 ### 1️⃣ 安装
@@ -92,28 +92,22 @@ NGROK_AUTH_TOKEN=your-ngrok-token
 **步骤 B：配置 MCP 服务器**（推荐使用 YAML）
 
 ```bash
-cp mcp-servers.example.yaml mcp-servers.yaml
-vim mcp-servers.yaml  # 编辑配置
+cp mcp-servers.example.json mcp-servers.json
+vim mcp-servers.json  # 编辑配置
 ```
 
-```yaml
-servers:
-  fetch:
-    command: uvx
-    args: [mcp-server-fetch]
-    description: "HTTP 内容抓取"
+```json
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "description": "HTTP/HTTPS content fetcher"
+    }
+  },
+  ......
+}
 ```
-
-<details>
-<summary>或使用环境变量方式（适合简单场景）</summary>
-
-在 `.env` 中添加：
-
-```env
-MCP_SERVERS={"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}
-```
-
-</details>
 
 ### 3️⃣ 启动
 
@@ -131,65 +125,6 @@ npm run start:tunnel
 
 看到启动横幅后，访问 http://localhost:3000/health 检查服务状态！
 
-### 🌐 快速部署到 E2B 云沙箱
-
-> E2B 提供隔离的云端沙箱环境，适合运行不受信任的 MCP 服务器。
-
-#### 步骤 1️⃣：准备 E2B 环境
-
-```bash
-# 注册 E2B 账号
-访问 https://e2b.dev 并获取 API Key
-
-# 安装 E2B CLI
-pip install e2b
-
-# 设置 API Key
-export E2B_API_KEY=your-e2b-api-key
-```
-
-#### 步骤 2️⃣：构建沙箱模板
-
-```bash
-cd deploy/e2b
-
-# 开发环境
-make e2b:build:dev
-
-# 或生产环境
-make e2b:build:prod
-```
-
-构建完成后会显示模板 ID，例如：`mcp-xyz123`
-
-#### 步骤 3️⃣：在代码中使用
-
-```python
-from e2b import AsyncSandbox
-import asyncio
-
-async def main():
-    # 创建沙箱（3 秒内启动）
-    sandbox = await AsyncSandbox.create('mcp-xyz123')
-
-    # 启动 MCP Bridge 服务
-    await sandbox.process.start("cd /app && npm start")
-
-    # 使用沙箱中的服务...
-    # 详见 docs/deployment-guide.md
-
-    await sandbox.kill()
-
-asyncio.run(main())
-```
-
-**E2B 优势**：
-- ✅ 完全隔离（安全运行第三方代码）
-- ✅ 快速启动（< 3 秒）
-- ✅ 按需扩容
-- ✅ 预装 Node.js + Python + uvx
-
-详细文档：[E2B 部署指南](docs/deployment-guide.md#e2b-沙箱部署)
 
 ---
 
@@ -197,133 +132,35 @@ asyncio.run(main())
 
 ### 模式一：Streamable HTTP方式
 
-通用型更强，可以被任何支持 Steamable http 协议的 MCP 客户端调用。
+通用型更强，可以被任何支持 Steamable http 协议的 MCP 客户端调用。如：Claude Code, Cursor, Codex, Github Copilot等。
 
-#### 步骤 1：配置服务器
+Streamable HTTP方式中，每个MCP Server都将通过路由机制分配唯一的URL地址可供调用。例如：
 
-**推荐方式：使用 YAML 配置文件** ⭐
+在 mcp-servers.json 中增加对于fetch MCP server的支持。
 
-创建 `mcp-servers.yaml`：
-
-```yaml
-servers:
-  fetch:
-    command: uvx
-    args:
-      - mcp-server-fetch
-    description: "HTTP/HTTPS 内容抓取工具"
-
-  filesystem:
-    command: npx
-    args:
-      - -y
-      - "@modelcontextprotocol/server-filesystem"
-      - /tmp
-    description: "访问 /tmp 目录"
-
-  github:
-    command: npx
-    args:
-      Or directly with Python scripts (now with selectable Dockerfile & alias):
-      ```bash
-      # Dev (default full Dockerfile)
-      python deploy/e2b/build_dev.py --dockerfile e2b.Dockerfile --alias mcp-dev-gui
-
-      # Dev using minimal Dockerfile variant
-      python deploy/e2b/build_dev.py --dockerfile e2b.Dockerfile.minimal --alias mcp-dev-mini
-
-      # Prod (skip-cache on, can override)
-      python deploy/e2b/build_prod.py --dockerfile e2b.Dockerfile --alias mcp-prod-gui --skip-cache
-      ```
-      - -y
-      - "@modelcontextprotocol/server-github"
-    env:
-      # 安全引用环境变量
-      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
-    description: "GitHub API 集成"
+```json
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "description": "HTTP/HTTPS content fetcher"
+    }
+  }
+}
 ```
 
-然后在 `.env` 中设置敏感信息：
-
-```env
-```bash
-# Default (uses built-in template id fallback)
-python deploy/e2b/e2b_sandbox_manager.py
-
-# Specify a template ID or alias produced from build scripts
-python deploy/e2b/e2b_sandbox_manager.py --template-id <template-or-alias> --sandbox-id my_sandbox
-
-# Fast create without waiting health + no internet
-python deploy/e2b/e2b_sandbox_manager.py --template-id <template-or-alias> --no-wait --no-internet
-```
-GITHUB_TOKEN=ghp_your_token_here
-```
-
-<details>
-<summary><b>方式 2：使用环境变量（简单场景）</b></summary>
-
-在 `.env` 中添加服务器定义：
-
-```env
-MCP_SERVERS={"fetch":{"command":"uvx","args":["mcp-server-fetch"]},"filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","/tmp"]}}
-```
-
-**注意**：环境变量方式适合简单配置，复杂场景建议使用 YAML 文件。
-
-</details>
-
-> 💡 **提示**：
-> - YAML 文件更易读、支持注释、版本控制友好
-> - 支持环境变量引用：`${VAR_NAME}` 语法
-> - 详细配置指南：[docs/configuration-guide.md](docs/configuration-guide.md)
-
-#### 步骤 2：创建会话并发送请求
-
-```bash
-curl -N http://localhost:3000/mcp/fetch \
-  -H "Authorization: Bearer your-secret-token-here" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '[
-    {"jsonrpc":"2.0","id":"1","method":"tools/list","params":{}}
-  ]'
-```
-
-**响应示例**（SSE 格式）：
+启动成功后，即可通过以下地址访问fetch MCP server：
 
 ```
-event: message
-id: 1
-data: {"jsonrpc":"2.0","id":"1","result":{"tools":[...]}}
+http://localhost:3000//mcp/fetch
 ```
 
-响应头会包含 `mcp-session-id: xxx-xxx-xxx`，用于后续请求。
-
-#### 步骤 3：复用会话
-
-```bash
-curl -N http://localhost:3000/mcp/fetch \
-  -H "Authorization: Bearer your-secret-token-here" \
-  -H "mcp-session-id: xxx-xxx-xxx" \
-  -H "Accept: application/json, text/event-stream" \
-  -d '[
-    {"jsonrpc":"2.0","id":"2","method":"tools/call","params":{...}}
-  ]'
-```
-
-#### 步骤 4：主动关闭会话（可选）
-
-```bash
-curl -X DELETE http://localhost:3000/mcp/fetch \
-  -H "Authorization: Bearer your-secret-token-here" \
-  -H "mcp-session-id: xxx-xxx-xxx"
-```
-
-**💡 提示**：会话空闲 5 分钟后会自动回收（可通过 `STREAM_SESSION_TTL_MS` 配置）。
+⚠️ 注意：必须在启动前通过mcp-servers.json进行配置，否则将无法使用。
 
 ---
 
-### 模式二：经典桥接方式
+### 模式二：经典桥接方式 (兼容之前的旧方式)
 
 非官方标准的调用方式，需要自己实现 tools/list, tools/call 等具体的方法
 
@@ -360,79 +197,23 @@ curl -X POST http://localhost:3000/bridge \
   }'
 ```
 
----
+### 加密与安全
 
-## 🔧 配置参数
+#### Authentication
+MCP Connect uses a simple token-based authentication system. The token is stored in the .env file. If the token is set, MCP Connect will use it to authenticate the request.
 
-### 环境变量
-
-| 环境变量 | 默认值 | 说明 |
-|---------|--------|------|
-| `PORT` | `3000` | HTTP 服务端口 |
-| `AUTH_TOKEN` | - | API 访问令牌（强烈建议设置） |
-| `ALLOWED_ORIGINS` | - | CORS 白名单，逗号分隔（如 `https://app.com,https://api.com`） |
-| `LOG_LEVEL` | `INFO` | 日志级别（`DEBUG`、`INFO`、`WARN`、`ERROR`） |
-| `STREAM_SESSION_TTL_MS` | `300000` | 流式会话空闲超时（毫秒） |
-| `NGROK_AUTH_TOKEN` | - | Ngrok 认证令牌 |
-
-### MCP 服务器配置
-
-**推荐：使用 YAML 配置文件**
-
-创建 `mcp-servers.yaml`（优先级最高）：
-
-```yaml
-servers:
-  server-name:
-    command: "可执行命令"
-    args: ["参数1", "参数2"]           # 可选
-    env:                               # 可选
-      KEY: "value"
-      SECRET: ${ENV_VAR}              # 引用环境变量
-    description: "服务器描述"          # 可选
-    timeout: 30000                     # 可选（毫秒）
-    retries: 3                         # 可选（重试次数）
+```bash
+Authorization: Bearer <your_auth_token>
 ```
 
-**配置优先级**：
-1. `mcp-servers.yaml` ← 最高优先级
-2. `mcp-servers.yml`
-3. `mcp-servers.json`
-4. `MCP_SERVERS` 环境变量 ← 兼容旧版本
+#### Allowed Origins
+在生产环境下，建议在环境变量中配置 `ALLOWED_ORIGINS`**，限制跨域请求来源：
 
-**配置示例**：
-
-<details>
-<summary>查看完整示例</summary>
-
-```yaml
-servers:
-  # 简单配置
-  fetch:
-    command: uvx
-    args: [mcp-server-fetch]
-
-  # 带环境变量
-  github:
-    command: npx
-    args: [-y, "@modelcontextprotocol/server-github"]
-    env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
-
-  # 完整配置
-  database:
-    command: /usr/local/bin/db-mcp-server
-    args: ["--host", "localhost"]
-    env:
-      DATABASE_URL: postgresql://${DB_USER}:${DB_PASS}@localhost/mydb
-    description: "PostgreSQL 数据库访问"
-    timeout: 60000
-    retries: 3
+```env
+ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
 ```
 
-</details>
-
-> 📖 **详细配置指南**：[docs/configuration-guide.md](docs/configuration-guide.md)
+如果设置了 ALLOWED_ORIGINS，不匹配的访问源将被拒绝。
 
 ---
 
@@ -449,9 +230,32 @@ servers:
 
 ---
 
+
+### `POST /mcp/:serverId`
+
+流式会话模式
+
+**路径参数**：
+- `serverId`：在 `MCP_SERVERS` 中定义的服务器 ID
+
+**请求头**：
+- `Authorization: Bearer <token>`（如已设置 `ACCESS_TOKEN`）
+- `Accept: application/json, text/event-stream`（必须）
+- `mcp-session-id: <session-id>`（可选，复用已有会话）
+
+**请求体**：
+```json
+[
+  {"jsonrpc":"2.0","id":"1","method":"tools/list","params":{}},
+  {"jsonrpc":"2.0","method":"notifications/initialized"}
+]
+```
+
+---
+
 ### `POST /bridge`
 
-短连接桥接模式
+原桥接模式
 
 **请求头**：
 - `Authorization: Bearer <token>`（如已设置 `ACCESS_TOKEN`）
@@ -478,44 +282,7 @@ servers:
 
 ---
 
-### `POST /mcp/:serverId`
-
-流式会话模式
-
-**路径参数**：
-- `serverId`：在 `MCP_SERVERS` 中定义的服务器 ID
-
-**请求头**：
-- `Authorization: Bearer <token>`
-- `Accept: application/json, text/event-stream`（必须）
-- `mcp-session-id: <session-id>`（可选，复用已有会话）
-
-**请求体**：
-```json
-[
-  {"jsonrpc":"2.0","id":"1","method":"tools/list","params":{}},
-  {"jsonrpc":"2.0","method":"notifications/initialized"}
-]
-```
-
-**响应**：
-- 如有请求（带 `id`）：返回 SSE 流
-- 仅通知（无 `id`）：返回 `202 Accepted`
-
----
-
-### `DELETE /mcp/:serverId`
-
-关闭会话
-
-**请求头**：
-- `mcp-session-id: <session-id>`（必须）
-
-**响应**：`204 No Content`
-
----
-
-## 🌐 外网访问（Ngrok）
+## 🌐 通过Ngrok提供外网访问隧道
 
 1. 获取 Ngrok 令牌：https://dashboard.ngrok.com/get-started/your-authtoken
 
@@ -537,25 +304,42 @@ servers:
 
 ---
 
-## 🔒 安全建议
+## 🌐 快速部署到 E2B 云沙箱
 
-1. **⚠️ 必须设置 `ACCESS_TOKEN`**
-   未设置会有警告日志，生产环境禁止不设令牌
+> E2B 提供隔离的云端沙箱环境，适合在安全环境中运行不受信任的 MCP 服务器。
 
-2. **配置 `ALLOWED_ORIGINS`**
-   限制跨域请求来源：
-   ```env
-   ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
-   ```
+### 步骤 1️⃣：准备 E2B 环境
 
-3. **使用 HTTPS**
-   生产环境建议通过反向代理（Nginx、Caddy）添加 SSL
+```bash
+# 注册 E2B 账号
+访问 https://e2b.dev 并获取 API Key
 
-4. **定期轮换令牌**
-   使用强随机令牌，定期更新
+# 安装 E2B CLI
+pip install e2b
 
-5. **审计日志**
-   检查 `error.log` 和 `combined.log` 中的异常访问
+# 设置 API Key
+export E2B_API_KEY=your-e2b-api-key
+```
+
+### 步骤 2️⃣：构建沙箱模板
+
+```bash
+cd deploy/e2b
+
+# 开发环境
+python build_dev.py
+
+# 或生产环境
+python build_prod.py
+```
+
+### 步骤 3️⃣：从模版启动沙盒
+
+```bash
+python sandbox_deploy.py --template-id mcp-dev-gui
+```
+
+详细文档：[E2B 部署指南](docs/deployment-guide.md#e2b-沙箱部署)
 
 ---
 
@@ -574,16 +358,6 @@ servers:
 LOG_LEVEL=DEBUG  # 开发环境
 LOG_LEVEL=INFO   # 生产环境（默认）
 LOG_LEVEL=WARN   # 仅警告和错误
-```
-
-### 健康检查
-
-```bash
-# 本地检查
-curl http://localhost:3000/health
-
-# 配合监控工具（如 UptimeRobot、Prometheus）
-# 每 30 秒自动检查一次
 ```
 
 ---
@@ -609,128 +383,16 @@ src/
 └── index.ts                 # 入口文件
 ```
 
-### 开发命令
-
-```bash
-# 热重载开发
-npm run dev
-
-# 代码检查
-npm run lint
-
-# 运行测试
-npm test
-
-# 类型检查
-npx tsc --noEmit
-```
-
-### 编码规范
-
-- **语言**：TypeScript（严格模式）
-- **缩进**：2 空格
-- **命名**：
-  - 函数/变量：`camelCase`
-  - 类：`PascalCase`
-  - 文件：`kebab-case.ts`
-- **导出**：优先使用命名导出
-
----
-
-## ❓ 常见问题
-
-<details>
-<summary><b>Q: 为什么返回 401 Unauthorized？</b></summary>
-
-**A**: 检查以下几点：
-1. 是否设置了 `ACCESS_TOKEN` 环境变量
-2. 请求头是否包含 `Authorization: Bearer <token>`
-3. Token 是否匹配（注意空格和特殊字符）
-</details>
-
-<details>
-<summary><b>Q: 返回 403 Origin not allowed 怎么办？</b></summary>
-
-**A**: 将请求来源添加到白名单：
-```env
-ALLOWED_ORIGINS=https://your-frontend-domain.com
-```
-</details>
-
-<details>
-<summary><b>Q: 404 Unknown MCP server 错误</b></summary>
-
-**A**: 检查 `MCP_SERVERS` 配置：
-1. JSON 格式是否正确（双引号、无尾随逗号）
-2. `serverId` 是否存在于配置中
-3. 示例：`MCP_SERVERS={"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}`
-</details>
-
-<details>
-<summary><b>Q: 会话超时怎么办？</b></summary>
-
-**A**: 会话空闲 5 分钟后自动关闭，可调整：
-```env
-STREAM_SESSION_TTL_MS=600000  # 改为 10 分钟
-```
-</details>
-
-<details>
-<summary><b>Q: 如何调试 MCP 服务器启动问题？</b></summary>
-
-**A**:
-1. 设置 `LOG_LEVEL=DEBUG` 查看详细日志
-2. 检查 MCP 服务器命令是否可执行（手动运行测试）
-3. 查看 `error.log` 中的错误堆栈
-</details>
-
----
-
-## 🗺️ 路线图
-
-- [ ] 添加完整的单元测试和集成测试
-- [ ] 支持 Prometheus metrics
-- [ ] WebSocket 双向流式传输
-- [ ] 配置文件热重载
-- [ ] Docker 镜像和 Kubernetes Helm Chart
-- [ ] OpenAPI/Swagger 文档
-- [ ] 多租户隔离
-
 ---
 
 ## 🤝 贡献指南
 
 欢迎提交 Issue 和 Pull Request！
 
-### 提交 PR 前请：
-
-1. 运行 `npm run lint` 确保代码规范
-2. 添加或更新测试用例
-3. 更新相关文档
-4. 在 PR 中描述改动和原因
-
----
-
-## 📄 许可证
-
-本项目采用 [MIT License](LICENSE) 开源。
-
----
-
-## 🙏 致谢
-
-- [Model Context Protocol](https://modelcontextprotocol.io/) - 协议规范
-- [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/sdk) - 官方 SDK
-- [Ngrok](https://ngrok.com/) - 隧道服务
-- [Express.js](https://expressjs.com/) - Web 框架
-- [Winston](https://github.com/winstonjs/winston) - 日志库
-
 ---
 
 <div align="center">
 
 **如果这个项目对你有帮助，请给一个 ⭐️ Star！**
-
-Made with ❤️ by [Your Name](https://github.com/yourusername)
 
 </div>

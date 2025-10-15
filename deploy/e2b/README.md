@@ -2,7 +2,7 @@
 
 将 MCP Bridge 部署到 E2B 云沙箱，获得完全隔离的运行环境。
 
-## ⚡ 快速开始（5 分钟）
+## ⚡ 快速开始
 
 ### 1️⃣ 安装依赖
 
@@ -23,73 +23,47 @@ export E2B_API_KEY=your-api-key-here
 ```bash
 cd deploy/e2b
 
-# 开发环境（快速构建）
-make e2b:build:dev
+# 开发环境
+python build_dev.py
 
-# 或生产环境（完整功能）
-make e2b:build:prod
+# 或生产环境
+python build_prod.py
 ```
 
-### 4️⃣ 运行快速演示
+参数说明：
+
+- `--dockerfile`
+  - 说明：Dockerfile 的相对或绝对路径，用于构建模板镜像。
+  - 默认值：`e2b.Dockerfile`
+  - 示例：`--dockerfile e2b.Dockerfile.minimal`
+
+- `--alias`
+  - 说明：为构建的模板指定一个别名（alias），便于后续引用与注册。
+  - 示例：`--alias mcp-dev-gui`
+
+- `--cpu`
+  - 说明：构建时分配的虚拟 CPU 数量（整数）。
+  - 默认值：`2`
+  - 示例：`--cpu 4`
+
+- `--memory-mb`
+  - 说明：构建时分配的内存大小，单位为 MB（整数）。
+  - 默认值：`2048`
+  - 示例：`--memory-mb 4096`
+
+- `--skip-cache`
+  - 说明：布尔开关；如果指定则在构建时跳过 Docker 缓存以强制重新构建全部层。开发环境默认使用缓存，生产环境默认不使用缓存。
+  - 示例：`--skip-cache`
+
+示例：
 
 ```bash
-python quickstart.py
+# 使用最小 Dockerfile，并注册为别名 mcp-dev-mini，分配 1 CPU、1GB 内存，并跳过缓存
+python build_dev.py --dockerfile e2b.Dockerfile.minimal --alias mcp-dev-mini --cpu 1 --memory-mb 1024 --skip-cache
+
+# 使用默认 Dockerfile，但把 alias 设置为 mcp-dev-gui，分配 4 CPU、4GB 内存
+python build_dev.py --alias mcp-dev-gui --cpu 4 --memory-mb 4096
 ```
-
-看到 `🎉 MCP Bridge 已在 E2B 沙箱中运行！` 即表示成功！
-
----
-
-## 📋 前置要求
-
-在开始之前，请确保：
-- ✅ 拥有 E2B 账号（注册：[e2b.dev](https://e2b.dev)）
-- ✅ 获取了 E2B API Key（获取：[E2B Dashboard](https://e2b.dev/dashboard)）
-- ✅ 安装了 Python 3.8+
-
-E2B 沙箱镜像预装：
-
-- ✅ Python 3 运行时
-- ✅ Node.js 18+
-- ✅ uv 工具链（`uv` 和 `uvx` 命令）
-- ✅ MCP Bridge 服务
-- ✅ Chrome DevTools（可选）
-
----
-
-## 🔧 详细配置
-
-### 构建沙箱模板
-
-**开发环境**（快速构建，适合测试）：
-
-```bash
-make e2b:build:dev
-# 或使用脚本并选择 Dockerfile / alias：
-python build_dev.py \
-  --dockerfile e2b.Dockerfile \
-  --alias mcp-dev-gui \
-  --cpu 2 \
-  --memory-mb 2048
-
-# 使用最小镜像：
-python build_dev.py --dockerfile e2b.Dockerfile.minimal --alias mcp-dev-mini
-```
-
-**生产环境**（完整功能，包含所有依赖）：
-
-```bash
-make e2b:build:prod
-# 或通过脚本（可自定义 Dockerfile / alias）
-python build_prod.py \
-  --dockerfile e2b.Dockerfile \
-  --alias mcp-prod-gui --cpu 2 --memory-mb 2048
-
-# 跳过缓存（默认已开启 skip cache，可显式指定）
-python build_prod.py --skip-cache --alias mcp-prod-gui
-```
-
-构建完成后会显示模板 ID，例如：`mcp-xyz123`
 
 ---
 
@@ -100,10 +74,7 @@ python build_prod.py --skip-cache --alias mcp-prod-gui
 运行预置的快速开始脚本：
 
 ```bash
-python quickstart.py  # 仍然使用默认模板 ID
-
-# 或直接创建沙箱并指定模板 ID：
-python e2b_sandbox_manager.py --template-id <template-or-alias> --sandbox-id my_sandbox
+python sandbox_deploy.py --template-id <template-id-or-alias>
 ```
 
 此脚本会：
@@ -111,6 +82,57 @@ python e2b_sandbox_manager.py --template-id <template-or-alias> --sandbox-id my_
 2. 启动 MCP Bridge 服务
 3. 自动测试健康检查和工具调用
 4. 显示沙箱信息
+
+参数说明：
+
+下面的参数对应 `deploy/e2b/sandbox_deploy.py` 的 CLI 选项（脚本将检查并回退到环境变量，必要时会退出）：
+
+- `--template-id`
+  - 说明：要使用的模板 ID 或 alias。可以通过命令行指定，也可以通过环境变量 `E2B_TEMPLATE_ID` 提供。
+  - 必需性：如果既没有 `--template-id` 也没有 `E2B_TEMPLATE_ID`，脚本会报错并退出。
+  - 示例：`--template-id mcp-xyz123`
+
+- `--sandbox-id`
+  - 说明：逻辑沙箱名称（用于本地管理与显示）。
+  - 默认值：`mcp_test_sandbox`
+  - 示例：`--sandbox-id demo1`
+
+- `--no-internet`
+  - 说明：布尔开关；如果指定则在创建的沙箱中禁用外网访问（allow_internet_access=False）。
+  - 默认值：允许外网访问（除非你指定此标志）。
+
+- `--no-wait`
+  - 说明：布尔开关；如果指定则脚本在创建沙箱后不等待内部服务 `/health` 就绪，直接返回。适合快速启动但不保证服务已经准备好。
+  - 默认值：等待服务就绪（会进行 /health 探测）。
+
+- `--timeout`
+  - 说明：沙箱的生命周期（秒）。该值也可以通过环境变量 `E2B_SANDBOX_TIMEOUT` 设置。
+  - 默认值：`3600`（1 小时）
+  - 示例：`--timeout 7200`
+
+重要环境变量：
+
+- `E2B_API_KEY`：必须设置；脚本入口检查此环境变量并在缺失时退出。示例：
+
+```bash
+export E2B_API_KEY='your-api-key-here'
+```
+
+- `E2B_TEMPLATE_ID`：可作为 `--template-id` 的替代（优先命令行参数）。
+- `E2B_SANDBOX_TIMEOUT`：设置默认的超时时间（秒），等同于 `--timeout`。
+
+使用示例：
+
+```bash
+# 指定模板并等待服务就绪
+python sandbox_deploy.py --template-id mcp-xyz123 --sandbox-id demo1
+
+# 从环境变量读取模板 ID，禁用外网，不等待就绪
+export E2B_TEMPLATE_ID=mcp-xyz123
+python sandbox_deploy.py --no-internet --no-wait
+```
+
+
 
 ### 方式 2：自定义 Python 代码
 
@@ -152,7 +174,6 @@ asyncio.run(main())
 
 | 文件 | 说明 |
 |------|------|
-| `quickstart.py` | 快速演示脚本（新手友好） |
 | `template.py` | 沙箱模板配置定义 |
 | `build_dev.py` | 开发环境构建脚本 |
 | `build_prod.py` | 生产环境构建脚本 |
@@ -163,48 +184,6 @@ asyncio.run(main())
 | `nginx.conf` | Nginx 反向代理配置 |
 | `view_sandbox_logs.py` | 日志查看工具 |
 | `e2b_sandbox_manager.py` | 沙箱管理工具 |
-
----
-
-## 🛠️ 沙箱内可用工具
-
-E2B 沙箱预装了以下工具：
-
-### Python 和 uvx
-
-```bash
-# 运行 Python 脚本
-python3 -c "print('hello from sandbox')"
-
-# 通过 uvx 执行 Python CLI
-uvx some-python-cli --help
-
-# 启动 MCP 服务器
-uvx mcp-server-fetch
-```
-
-### Node.js 和 npm
-
-```bash
-# 运行 Node.js 脚本
-node -e "console.log('hello')"
-
-# 使用 npm 包
-npx @modelcontextprotocol/server-github
-```
-
-### MCP Bridge API
-
-```bash
-# 健康检查
-curl http://localhost:3000/health
-
-# 调用桥接端点
-curl -X POST http://localhost:3000/bridge \
-  -H "Authorization: Bearer token" \
-  -H "Content-Type: application/json" \
-  -d '{"serverPath":"uvx","args":["mcp-server-fetch"],"method":"tools/list","params":{}}'
-```
 
 ---
 
@@ -237,101 +216,20 @@ python e2b_sandbox_manager.py stop <sandbox_id>
 python e2b_sandbox_manager.py stop-all
 ```
 
-参数说明：
-
-| 参数 | 说明 |
-|------|------|
-| `--template-id` | 使用 `build_dev.py` 或 `build_prod.py` 生成的模板 ID 或 alias |
-| `--sandbox-id` | 逻辑沙箱名（默认 `mcp_test_sandbox`） |
-| `--no-internet` | 关闭沙箱外网访问 |
-| `--no-wait` | 不等待服务 `/health` 就绪，直接返回结果 |
-| `--timeout` | 设置沙箱生命周期（秒） |
-
 ### 进入沙箱调试
 
 ```python
-# 在 Python 代码中
-process = await sandbox.process.start("bash", on_stdout=print, on_stderr=print)
-await process.send_stdin("ls -la /app\n")
-```
-
----
-
-## ⚙️ 配置 MCP 服务器
-
-编辑 `servers.json` 添加自定义 MCP 服务器：
-
-```json
-{
-  "servers": {
-    "fetch": {
-      "command": "uvx",
-      "args": ["mcp-server-fetch"],
-      "env": {}
-    },
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
-      }
-    }
-  }
-}
+python view_sandbox_logs.py <sandbox_id> --exec "<command_to_run>"
 ```
 
 ---
 
 ## 📖 更多资源
 
-- **完整部署指南**：[../../docs/deployment-guide.md](../../docs/deployment-guide.md)
-- **配置说明**：[../../docs/configuration-guide.md](../../docs/configuration-guide.md)
 - **E2B 官方文档**：https://e2b.dev/docs
 - **MCP 协议规范**：https://modelcontextprotocol.io
 
 ---
 
-## 🐛 常见问题
 
-### 沙箱创建失败
-
-```
-❌ Error: Failed to create sandbox
-```
-
-**解决方案**：
-1. 检查 E2B API Key 是否正确
-2. 确认模板已构建成功
-3. 查看账户配额是否用尽
-
-### 服务启动超时
-
-```
-❌ 超时：等待服务启动
-```
-
-**解决方案**：
-1. 增加 `wait_for_server` 的 `max_retries`
-2. 检查沙箱日志：`python view_sandbox_logs.py <id>`
-3. 确认镜像包含所有依赖
-
-### 无法调用 MCP 工具
-
-```
-❌ 401 Unauthorized
-```
-
-**解决方案**：
-1. 检查 `ACCESS_TOKEN` 是否正确传递
-2. 确认请求头包含 `Authorization: Bearer <token>`
-
----
-
-## 🚀 下一步
-
-1. ✅ 运行 `python quickstart.py` 体验沙箱
-2. ✅ 自定义 `servers.json` 添加你的 MCP 服务器
-3. ✅ 阅读完整部署指南了解高级功能
-4. ✅ 查看 E2B 文档探索更多可能性
-
-**享受在云端运行 MCP Bridge 的乐趣！** 🎉
+**享受在云端运行 MCP Connect 的乐趣！** 🎉

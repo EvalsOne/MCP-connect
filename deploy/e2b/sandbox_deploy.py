@@ -212,6 +212,12 @@ class E2BSandboxManager:
             # Derive displayed port for nginx based on the chosen URL
             nginx_port = 443 if public_url.startswith("https") else 80
             novnc_url = f"{public_url.rstrip('/')}{self.config.novnc_path}vnc.html"
+            # Derive websocket (noVNC/websockify) URL (public_url already includes scheme)
+            ws_scheme = "wss" if public_url.startswith("https") else "ws"
+            # public_url like https://host; we append /websockify
+            websocket_url = f"{ws_scheme}://{public_url.split('://', 1)[1].rstrip('/')}/websockify"
+            # Resolve effective VNC password (custom if provided else auth_token)
+            vnc_password_resolved = self.config.vnc_password if self.config.vnc_password else self.config.auth_token
 
             result = {
                 "success": True,
@@ -219,6 +225,8 @@ class E2BSandboxManager:
                 "e2b_sandbox_id": sandbox.sandbox_id,
                 "public_url": public_url,
                 "novnc_url": novnc_url,
+                "websocket_url": websocket_url,
+                "vnc_password_resolved": vnc_password_resolved,
                 "services": {
                     "nginx": {
                         "url": public_url,
@@ -248,14 +256,17 @@ class E2BSandboxManager:
                         "port": self.config.vnc_port,
                         "status": "running",
                         "password_hint": "auth_token" if not self.config.vnc_password else "custom",
+                        "resolved_password": vnc_password_resolved,
                     },
                     "novnc": {
                         "url": novnc_url,
+                        "websocket_url": websocket_url,
                         "port": self.config.novnc_port,
                         "path": self.config.novnc_path,
                         "status": "running",
                         "requires_password": True,
                         "password_hint": "auth_token" if not self.config.vnc_password else "custom",
+                        "resolved_password": vnc_password_resolved,
                     },
                 },
                 "security": {
@@ -337,6 +348,12 @@ class E2BSandboxManager:
             "NOVNC_PORT": novnc_port,
             "NOVNC_WEBROOT": novnc_webroot,
             "VNC_PASSWORD": vnc_password,
+            # Optional x11vnc tuning knobs passed through if user sets them in outer env
+            "X11VNC_WAIT": os.getenv("X11VNC_WAIT", "20"),
+            "X11VNC_DEFER": os.getenv("X11VNC_DEFER", "20"),
+            "X11VNC_COMPRESSION": os.getenv("X11VNC_COMPRESSION", "9"),
+            "X11VNC_QUALITY": os.getenv("X11VNC_QUALITY", "5"),
+            "X11VNC_EXTRA": os.getenv("X11VNC_EXTRA", ""),
         }
 
         logger.info("Configuring MCP environment variables inside sandbox...")
@@ -878,6 +895,10 @@ async def main():
     print("="*60)
     print(f"\n📦 Sandbox ID: {result['sandbox_id']}")
     print(f"🌐 Public URL: {result['public_url']}")
+    if 'novnc_url' in result:
+        print(f"🖥️  noVNC URL: {result['novnc_url']}")
+    if 'websocket_url' in result:
+        print(f"🔌 WebSocket URL: {result['websocket_url']}")
     print(f"\n🔧 Services:")
     for service_name, service_info in result['services'].items():
         print(f"  - {service_name}:")
