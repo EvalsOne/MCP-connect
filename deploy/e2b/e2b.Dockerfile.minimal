@@ -44,4 +44,4 @@ ENV HEADLESS=1
 USER user
 WORKDIR /home/user
 
-CMD ["/home/user/startup.sh"]
+CMD /home/user/startup.sh
