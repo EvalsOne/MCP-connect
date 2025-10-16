@@ -35,7 +35,6 @@
         "@playwright/mcp@latest",
         "--headless=false",
         "--cdp-endpoint=http://127.0.0.1:9222",
-        "--logFile=/home/user/playwright-debug.log",
         "--viewport=1280x800"
       ]
     }
