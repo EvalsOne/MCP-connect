@@ -517,7 +517,20 @@ export class HttpServer {
     };
 
     const onSessionError = (error: Error) => {
-      writeEvent({ error: error.message }, 'error');
+      // Emit JSON-RPC error responses for all pending request IDs
+      const errMsg = error?.message ?? 'Stream session error';
+      const errorCode = 32603; // JSON-RPC internal error
+      if (pendingIds.size === 0) {
+        // If we don't have any pending IDs, emit a synthetic message to help clients notice the failure
+        // Note: JSON-RPC responses should carry an id; when none is available, clients may simply close.
+        // We prefer not to send a nonstandard SSE event type.
+        writeEvent({ jsonrpc: '2.0', error: { code: errorCode, message: errMsg } });
+      } else {
+        for (const id of Array.from(pendingIds)) {
+          writeEvent({ jsonrpc: '2.0', id, error: { code: errorCode, message: errMsg } });
+        }
+        pendingIds.clear();
+      }
       cleanup();
     };
 
@@ -538,7 +551,16 @@ export class HttpServer {
       await forwardMessages();
     } catch (error) {
       this.logger.error('Failed to forward JSON-RPC request batch:', error);
-      writeEvent({ error: 'Failed to forward request to MCP server' }, 'error');
+      const errMsg = error instanceof Error ? error.message : 'Failed to forward request to MCP server';
+      const errorCode = 32603; // JSON-RPC internal error
+      if (pendingIds.size === 0) {
+        writeEvent({ jsonrpc: '2.0', error: { code: errorCode, message: errMsg } });
+      } else {
+        for (const id of Array.from(pendingIds)) {
+          writeEvent({ jsonrpc: '2.0', id, error: { code: errorCode, message: errMsg } });
+        }
+        pendingIds.clear();
+      }
       cleanup();
     }
   }

@@ -28,6 +28,12 @@
         "--logFile=/home/user/mcp-debug.log",
         "--viewport=1280x800"
       ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest"
+      ]
     }
   }
 }
