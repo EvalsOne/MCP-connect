@@ -52,6 +52,17 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
     && npm install -g npm@latest
 
+# Create sandbox user (idempotent) and add to sudoers only once
+RUN set -euo pipefail; \
+        if id -u user >/dev/null 2>&1; then \
+            echo "User 'user' already exists, skipping creation"; \
+        else \
+            useradd -m -s /bin/bash -u 1000 user; \
+        fi; \
+        if ! grep -q '^user .*NOPASSWD:ALL' /etc/sudoers; then \
+            echo 'user ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers; \
+        fi
+
 # Install uv (provides `uv` and `uvx`) for the sandbox user and expose globally
 # Some builder environments do not support the -y flag for the install script;
 # add a retry + checksum-less fallback to avoid hard failure.
@@ -101,17 +112,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav \
     && rm -rf /var/lib/apt/lists/*
 
-
-# Create sandbox user (idempotent) and add to sudoers only once
-RUN set -euo pipefail; \
-        if id -u user >/dev/null 2>&1; then \
-            echo "User 'user' already exists, skipping creation"; \
-        else \
-            useradd -m -s /bin/bash -u 1000 user; \
-        fi; \
-        if ! grep -q '^user .*NOPASSWD:ALL' /etc/sudoers; then \
-            echo 'user ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers; \
-        fi
 
 USER user
 WORKDIR /home/user

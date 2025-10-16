@@ -44,6 +44,21 @@ RUN useradd -m -s /bin/bash -u 1000 user && \
 USER user
 WORKDIR /home/user
 
+# Install uv (Astral) for the sandbox user and expose globally
+RUN set -euo pipefail; \
+    echo "Installing uv (primary method)"; \
+    if ! curl -fsSL https://astral.sh/uv/install.sh | sh -s --; then \
+        echo "Primary uv installation failed; retrying (no flags)..."; \
+        sleep 2; \
+        curl -fsSL https://astral.sh/uv/install.sh | sh -s -- || { echo 'uv install failed'; exit 1; }; \
+    fi; \
+    test -x "$HOME/.local/bin/uv" || { echo 'uv binary missing after install'; exit 1; }
+
+USER root
+RUN if [ -f /home/user/.local/bin/uv ]; then install -m 0755 /home/user/.local/bin/uv /usr/local/bin/uv; fi \ 
+ && if [ -f /home/user/.local/bin/uvx ]; then install -m 0755 /home/user/.local/bin/uvx /usr/local/bin/uvx; else ln -sf /usr/local/bin/uv /usr/local/bin/uvx; fi
+USER user
+
 RUN git clone -b dev_streamable_http --single-branch https://github.com/EvalsOne/MCP-connect.git /home/user/mcp-connect && \
     cd /home/user/mcp-connect && \
     npm install && \
@@ -283,7 +298,7 @@ RUN mkdir -p /home/user/app && \
 ENV AUTH_TOKEN="demo#e2b"
 ENV PORT=3000
 ENV HOST=127.0.0.1
-
+ENV HEADLESS=1
 
 USER user
 WORKDIR /home/user
