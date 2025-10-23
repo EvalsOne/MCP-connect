@@ -10,15 +10,7 @@
       "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
       "description": "Local filesystem access to /tmp directory"
     },
-    "chrome-devtools": {
-      "command": "npx",
-      "args": [
-        "chrome-devtools-mcp@latest",
-        "--headless=false",
-        "--isolated=true"
-      ]
-    },
-    "chrome-devtools-e2b": {
+    "chrome-devtools-headful": {
       "command": "npx",
       "args": [
         "chrome-devtools-mcp@latest",
@@ -28,6 +20,19 @@
         "--logFile=/home/user/mcp-debug.log",
         "--viewport=1280x800"
       ]
+    },
+    "playwright-headful": {
+      "command": "npx",
+      "args": [
+        "@playwright/mcp@latest",
+        "--browser=chrome",
+        "--no-sandbox",
+        "--viewport-size=1280x800",
+        "--cdp-endpoint=http://127.0.0.1:9222/"
+      ],
+      "env": {
+        "DISPLAY": ":99"
+      }
     }
   }
 }

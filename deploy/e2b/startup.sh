@@ -205,7 +205,6 @@ XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/home/user/.xdg}
 mkdir -p "$XDG_RUNTIME_DIR"
 
 /usr/bin/google-chrome \
-  --no-sandbox \
   --disable-dev-shm-usage \
   --remote-debugging-port=9222 \
   --remote-debugging-address=127.0.0.1 \
