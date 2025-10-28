@@ -520,10 +520,10 @@ class E2BSandboxManager:
         # Controlled by environment variables so callers can opt-in without code changes:
         #   E2B_FETCH_REMOTE=1 to enable
         #   E2B_REMOTE_BASE=https://raw.githubusercontent.com/<org>/<repo>/<branch>/deploy/e2b
-        fetch_remote = os.getenv("E2B_FETCH_REMOTE", "1").strip() in ("1", "true", "TRUE")
+        fetch_remote = os.getenv("E2B_FETCH_REMOTE", "0").strip() in ("1", "true", "TRUE")
         remote_base = os.getenv(
             "E2B_REMOTE_BASE",
-            "https://raw.githubusercontent.com/EvalsOne/MCP-bridge/main/deploy/e2b",
+            "https://raw.githubusercontent.com/EvalsOne/MCP-bridge/main/deploy/e2b"
         )
 
         # Try to load resources from packaged e2b_mcp_sandbox if not present next to this file
