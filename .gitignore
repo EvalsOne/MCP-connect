@@ -54,3 +54,10 @@ temp/
 **/credentials/*
 
 literal:old_text=new_text
+
+# MCP server configuration
+mcp-servers.json
+
+# AGENTS
+AGENTS.md
+CLAUDE.md
