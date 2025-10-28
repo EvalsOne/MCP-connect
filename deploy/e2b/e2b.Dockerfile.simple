@@ -38,8 +38,15 @@ RUN apt-get update && apt-get install -y \
     libxshmfence1 \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -s /bin/bash -u 1000 user && \
-    echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+RUN set -euo pipefail; \
+        if id -u user >/dev/null 2>&1; then \
+            echo "User 'user' already exists, skipping creation"; \
+        else \
+            useradd -m -s /bin/bash -u 1000 user; \
+        fi; \
+        if ! grep -q '^user .*NOPASSWD:ALL' /etc/sudoers; then \
+            echo 'user ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers; \
+        fi
 
 USER user
 WORKDIR /home/user
@@ -171,13 +178,14 @@ RUN printf '%s\n' \
 '' \
 'echo "Starting E2B MCP Sandbox..."' \
 '' \
-'AUTH_TOKEN="${AUTH_TOKEN:-demo#e2b}"' \
+'AUTH_TOKEN="${E2B_MCP_AUTH_TOKEN:-${AUTH_TOKEN:-}}"' \
 'PORT="${PORT:-3000}"' \
 'HOST="${HOST:-127.0.0.1}"' \
 '' \
 'export AUTH_TOKEN PORT HOST' \
 '' \
-'echo "Using AUTH_TOKEN=${AUTH_TOKEN} PORT=${PORT} HOST=${HOST}"' \
+'if [ -n "${AUTH_TOKEN}" ]; then TOKEN_STATUS="set"; else TOKEN_STATUS="unset"; fi' \
+'echo "Using AUTH_TOKEN=${TOKEN_STATUS} PORT=${PORT} HOST=${HOST}"' \
 '' \
 '# Prepare MCP-connect configuration' \
 'cd /home/user/mcp-connect || { echo "mcp-connect directory missing"; exit 1; }' \
@@ -295,8 +303,6 @@ RUN printf '%s\n' \
 RUN mkdir -p /home/user/app && \
     chown -R user:user /home/user/app
 
-ENV AUTH_TOKEN="demo#e2b"
-ENV PORT=3000
 ENV HOST=127.0.0.1
 ENV HEADLESS=1
 

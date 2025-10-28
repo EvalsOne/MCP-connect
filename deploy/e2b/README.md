@@ -23,11 +23,8 @@ export E2B_API_KEY=your-api-key-here
 ```bash
 cd deploy/e2b
 
-# For development environment
-python build_dev.py
-
-# For production environment
-python build_prod.py
+python build.py --mode dev --variant full
+python build.py --mode prod --variant minimal --skip-cache
 ```
 
 Parameters
@@ -75,14 +72,12 @@ Parameters
 Examples
 
 ```bash
-# Use built-in simple variant (no X desktop, noVNC, headless Chrome) and alias as mcp-dev-simple
-python build_dev.py --variant simple --cpu 2 --memory-mb 2048
+python build.py --mode dev --variant simple --cpu 2 --memory-mb 2048
+python build.py --mode dev --variant minimal --cpu 1 --memory-mb 1024 --skip-cache
+python build.py --mode dev --alias mcp-dev-gui --cpu 4 --memory-mb 4096
 
-# Use minimal variant (no X/Chrome/noVNC, fastest startup) and alias as mcp-dev-minimal
-python build_dev.py --variant minimal --cpu 1 --memory-mb 1024 --skip-cache
-
-# Use default Dockerfile, set alias to mcp-dev-gui, allocate 4 CPU and 4GB RAM
-python build_dev.py --alias mcp-dev-gui --cpu 4 --memory-mb 4096
+python build.py --mode prod --variant full --quiet
+python build.py --mode prod --variant simple --verbose
 ```
 
 ---
@@ -133,6 +128,18 @@ These map to `deploy/e2b/sandbox_deploy.py` CLI options (the script falls back t
   - What: lightweight headless mode; skip Xvfb/fluxbox/Chrome/VNC/noVNC, keep Nginx + MCP-connect
   - Default: off (GUI mode)
 
+- `--auth-token`
+  - What: sets the bridge API Bearer token. When omitted, the deploy flow prefers `E2B_MCP_AUTH_TOKEN` from the environment, then falls back to `AUTH_TOKEN` for compatibility. Requests must include `Authorization: Bearer <token>` when set.
+  - Default: unset (server warns and allows unauthenticated access). For production, set a strong token.
+
+- `--no-remote-fetch`
+  - What: disable fetching latest `startup.sh`, `chrome-devtools-wrapper.sh`, and `mcp-servers.json` from a remote base inside the sandbox
+  - Default: off (remote fetch enabled by config default)
+
+- `--remote-base`
+  - What: remote base URL used when fetching assets (e.g. `https://raw.githubusercontent.com/<org>/<repo>/<branch>/deploy/e2b`)
+  - Default: `https://raw.githubusercontent.com/EvalsOne/MCP-bridge/main/deploy/e2b`
+
 Important environment variables
 
 - `E2B_API_KEY`: required; the script checks this and exits if missing. Example:
@@ -141,8 +148,18 @@ Important environment variables
 export E2B_API_KEY='your-api-key-here'
 ```
 
+- `E2B_MCP_AUTH_TOKEN`: preferred environment variable for securing the MCP bridge in E2B deployments. Example:
+
+```bash
+export E2B_MCP_AUTH_TOKEN='your-secure-token'
+```
+
+- `AUTH_TOKEN`: legacy/generic alternative. Still accepted as a fallback if `E2B_MCP_AUTH_TOKEN` is not set.
+
 - `E2B_TEMPLATE_ID`: alternative to `--template-id` (CLI takes precedence)
 - `E2B_SANDBOX_TIMEOUT`: default timeout in seconds, same as `--timeout`
+  
+Note: Remote asset fetch control (`fetch_remote`, `remote_base`) is now configured via `SandboxConfig` or the CLI flags above, not environment variables.
 
 Examples
 
@@ -150,9 +167,16 @@ Examples
 # Specify template and wait for readiness
 python sandbox_deploy.py --template-id mcp-xyz123 --sandbox-id demo1
 
+# With explicit auth token
+python sandbox_deploy.py --template-id mcp-xyz123 --auth-token 's3cr3t-token'
+
 # Read template ID from env, disable internet, do not wait for readiness
 export E2B_TEMPLATE_ID=mcp-xyz123
 python sandbox_deploy.py --no-internet --no-wait
+
+# Secure the bridge via environment variable (no CLI flag)
+export E2B_MCP_AUTH_TOKEN='s3cr3t-token'
+python sandbox_deploy.py --template-id mcp-xyz123 --sandbox-id demo1
 ```
 
 ---

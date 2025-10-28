@@ -22,7 +22,8 @@ log() {
 log "Starting E2B MCP Sandbox..."
 log "Startup script version: ${STARTUP_VERSION}"
 
-AUTH_TOKEN=${AUTH_TOKEN:-demo#e2b}
+# Read token from namespaced env first, then generic; no hardcoded default
+AUTH_TOKEN=${E2B_MCP_AUTH_TOKEN:-${AUTH_TOKEN:-}}
 PORT=${PORT:-3000}
 HOST=${HOST:-127.0.0.1}
 HEADLESS=${HEADLESS:-0}
@@ -43,7 +44,9 @@ XVFB_HEIGHT=${XVFB_HEIGHT:-${HEIGHT_WITH_DEPTH%%x*}}
 
 export AUTH_TOKEN PORT HOST DISPLAY XVFB_DISPLAY XVFB_RESOLUTION XVFB_WIDTH XVFB_HEIGHT VNC_PORT NOVNC_PORT NOVNC_WEBROOT
 
-log "Using AUTH_TOKEN=${AUTH_TOKEN} PORT=${PORT} HOST=${HOST} DISPLAY=${XVFB_DISPLAY} HEADLESS=${HEADLESS}"
+# Avoid printing the token value; only indicate whether it is set
+if [ -n "${AUTH_TOKEN}" ]; then TOKEN_STATUS="set"; else TOKEN_STATUS="unset"; fi
+log "Using AUTH_TOKEN=${TOKEN_STATUS} PORT=${PORT} HOST=${HOST} DISPLAY=${XVFB_DISPLAY} HEADLESS=${HEADLESS}"
 
 prepare_mcp_env() {
     # Prepare MCP-connect configuration and ensure deps

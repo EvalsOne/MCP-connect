@@ -70,7 +70,7 @@ class SandboxConfig:
     timeout: int = 3600  # 1 hour default timeout in seconds
     api_key: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
-    auth_token: str = "demo#e2b"
+    auth_token: str = "your-auth-token"
     port: int = 3000
     host: str = "127.0.0.1"
     secure: bool = True
@@ -86,6 +86,13 @@ class SandboxConfig:
     vnc_password: Optional[str] = ""
     # Headless/lightweight mode: skip X/Chrome/VNC/noVNC bootstrap
     headless: bool = False
+    # Remote asset fetch settings (instead of env vars)
+    # When enabled, manager fetches latest startup.sh, chrome-devtools-wrapper.sh,
+    # and servers.json from the configured remote_base inside the sandbox.
+    fetch_remote: bool = False
+    remote_base: str = (
+        "https://raw.githubusercontent.com/EvalsOne/MCP-bridge/main/deploy/e2b"
+    )
 
 class E2BSandboxManager:
     """Manager for E2B Sandboxes with MCP support"""
@@ -262,7 +269,6 @@ class E2BSandboxManager:
                     "mcp_connect": {
                         "url": f"{public_url}/bridge",
                         "port": self.config.port,
-                        "auth_token": self.config.auth_token,
                         "status": "running",
                         "pid": handles["mcp_connect"].pid if handles.get("mcp_connect") else None,
                     },
@@ -517,14 +523,9 @@ class E2BSandboxManager:
         local_servers = os.path.join(repo_dir, "servers.json")
 
         # Optional: prefer fetching assets from a remote repo (always-latest) inside the sandbox
-        # Controlled by environment variables so callers can opt-in without code changes:
-        #   E2B_FETCH_REMOTE=1 to enable
-        #   E2B_REMOTE_BASE=https://raw.githubusercontent.com/<org>/<repo>/<branch>/deploy/e2b
-        fetch_remote = os.getenv("E2B_FETCH_REMOTE", "1").strip() in ("1", "true", "TRUE")
-        remote_base = os.getenv(
-            "E2B_REMOTE_BASE",
-            "https://raw.githubusercontent.com/EvalsOne/MCP-bridge/main/deploy/e2b",
-        )
+        # Now controlled via SandboxConfig instead of environment variables.
+        fetch_remote = bool(self.config.fetch_remote)
+        remote_base = str(self.config.remote_base).strip()
 
         # Try to load resources from packaged e2b_mcp_sandbox if not present next to this file
         def _resource_text(pkg: str, name: str) -> Optional[str]:
@@ -1082,6 +1083,9 @@ async def main():
     parser.add_argument("--timeout", type=int, default=3600, help="Sandbox timeout seconds (default 3600)")
     parser.add_argument("--xvfb-resolution", dest="xvfb_resolution", default=os.getenv("XVFB_RESOLUTION", ""), help="Set Xvfb resolution, e.g. 1280x800x24 (env: XVFB_RESOLUTION)")
     parser.add_argument("--headless", action="store_true", help="Launch in lightweight headless mode (no X/noVNC/VNC/Chrome)")
+    parser.add_argument("--auth-token", dest="auth_token", default=None, help="Bearer token for bridge API auth (maps to AUTH_TOKEN)")
+    parser.add_argument("--no-remote-fetch", action="store_true", help="Disable fetching startup.sh and configs from remote base")
+    parser.add_argument("--remote-base", default=None, help="Remote base URL to fetch assets (e.g. https://raw.githubusercontent.com/<org>/<repo>/<branch>/deploy/e2b)")
     args = parser.parse_args()
 
     template_id = (args.template_id or os.getenv("E2B_TEMPLATE_ID", "")).strip()
@@ -1094,6 +1098,17 @@ async def main():
         metadata={"purpose": ("mcp-dev-headless" if args.headless else "mcp-dev-gui")},
         headless=bool(args.headless),
     )
+    # Prefer CLI --auth-token; otherwise fall back to environment variables
+    if args.auth_token:
+        config.auth_token = args.auth_token
+    else:
+        env_token = os.getenv("E2B_MCP_AUTH_TOKEN") or os.getenv("AUTH_TOKEN") or ""
+        if env_token:
+            config.auth_token = env_token
+    if args.no_remote_fetch:
+        config.fetch_remote = False
+    if args.remote_base:
+        config.remote_base = args.remote_base
     if args.xvfb_resolution:
         config.xvfb_resolution = args.xvfb_resolution
     manager = E2BSandboxManager(config)

@@ -75,11 +75,11 @@ npm install
 cp .env.example .env
 ```
 
-**B. Configure MCP servers** (For Streamable HTTP method)
+**B. Configure MCP servers**
 
+For Streamable HTTP method, each MCP server needs to be configurated separately, edit file to add more configurations other than the existing sample servers.
 ```bash
-cp mcp-servers.example.json mcp-servers.json
-vim mcp-servers.json  # edit config to add more MCP servers support.
+vim mcp-servers.json  
 ```
 
 ### 3) Run
@@ -289,12 +289,17 @@ pip install e2b
 export E2B_API_KEY=your-e2b-api-key
 ```
 
+Optionally set a bearer token for the bridge (preferred env for E2B deployments):
+
+```bash
+export E2B_MCP_AUTH_TOKEN=your-secure-token
+```
+
 ### Step 2: Build sandbox templates
 
 ```bash
 cd deploy/e2b
-python build_dev.py   # dev
-python build_prod.py  # prod
+python build.py
 ```
 
 ### Step 3: Launch from template

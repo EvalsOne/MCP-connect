@@ -1,7 +1,5 @@
 FROM ubuntu:22.04
-
 ENV DEBIAN_FRONTEND=noninteractive
-
 RUN apt-get update && apt-get install -y \
     curl \
     wget \
@@ -12,18 +10,20 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     nginx \
     && rm -rf /var/lib/apt/lists/*
-
 RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && npm install -g npm@latest
-
-RUN useradd -m -s /bin/bash -u 1000 user && \
-    echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
+RUN set -euo pipefail; \
+        if id -u user >/dev/null 2>&1; then \
+            echo "User 'user' already exists, skipping creation"; \
+        else \
+            useradd -m -s /bin/bash -u 1000 user; \
+        fi; \
+        if ! grep -q '^user .*NOPASSWD:ALL' /etc/sudoers; then \
+            echo 'user ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers; \
+        fi
 USER user
 WORKDIR /home/user
-
-# Install uv (Astral) for the sandbox user and expose globally
 RUN set -euo pipefail; \
     echo "Installing uv (primary method)"; \
     if ! curl -fsSL https://astral.sh/uv/install.sh | sh -s --; then \
@@ -32,32 +32,23 @@ RUN set -euo pipefail; \
         curl -fsSL https://astral.sh/uv/install.sh | sh -s -- || { echo 'uv install failed'; exit 1; }; \
     fi; \
     test -x "$HOME/.local/bin/uv" || { echo 'uv binary missing after install'; exit 1; }
-
 USER root
 RUN if [ -f /home/user/.local/bin/uv ]; then install -m 0755 /home/user/.local/bin/uv /usr/local/bin/uv; fi \ 
  && if [ -f /home/user/.local/bin/uvx ]; then install -m 0755 /home/user/.local/bin/uvx /usr/local/bin/uvx; else ln -sf /usr/local/bin/uv /usr/local/bin/uvx; fi
 USER user
-
 RUN git clone https://github.com/EvalsOne/MCP-connect.git /home/user/mcp-connect && \
     cd /home/user/mcp-connect && \
     npm install && \
     npm run build
 
 RUN mkdir -p /home/user/.config/mcp
-
 USER root
-
 COPY nginx.conf /etc/nginx/sites-available/default
 COPY startup.sh /home/user/startup.sh
 RUN chmod +x /home/user/startup.sh && \
     chown user:user /home/user/startup.sh
-
-ENV AUTH_TOKEN="demo#e2b"
-ENV PORT=3000
 ENV HOST=127.0.0.1
 ENV HEADLESS=1
-
 USER user
 WORKDIR /home/user
-
 CMD /home/user/startup.sh
