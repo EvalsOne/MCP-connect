@@ -1,0 +1,35 @@
+{
+  "name": "mcp-bridge",
+  "version": "1.0.0",
+  "description": "A bridge service for MCP Server communication",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:tunnel": "node dist/index.js --tunnel",
+    "dev": "tsc --watch & node --watch dist/index.js",
+    "dev:tunnel": "tsc --watch & node --watch dist/index.js --tunnel",
+    "lint": "eslint src/",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.3",
+    "dotenv": "^16.0.3",
+    "express": "^4.19.2",
+    "ngrok": "^5.0.0-beta.2",
+    "winston": "^3.8.2",
+    "esbuild": ">=0.25.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.28",
+    "eslint": "^9.8.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.4",
+    "tsx": "^4.16.5",
+    "typescript": "^5.4.2",
+    "esbuild": ">=0.25.0"
+  }
+}
