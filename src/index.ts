@@ -11,7 +11,7 @@ const __dirname = path.dirname(__filename);
 
 const result = dotenv.config({ 
   path: path.resolve(__dirname, '../.env'),
-  override: true  // 强制覆盖已存在的环境变量
+  override: true
 });
 
 if (result.error) {

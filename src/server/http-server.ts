@@ -1,9 +1,12 @@
 import { EventEmitter } from 'events';
 import express, { Request, Response } from 'express';
-import { Config } from '../config/config.js';
+import { Config, StreamableServerConfig } from '../config/config.js';
 import { Logger } from '../utils/logger.js';
 import { MCPClientManager } from '../client/mcp-client-manager.js';
 import { TunnelManager } from '../utils/tunnel.js';
+import { StreamSessionManager } from '../stream/session-manager.js';
+import type { StreamSession } from '../stream/stream-session.js';
+import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 
 export class HttpServer {
   private app = express();
@@ -11,14 +14,20 @@ export class HttpServer {
   private readonly logger: Logger;
   private readonly mcpClient: MCPClientManager;
   private readonly accessToken: string;
+  private readonly allowedOrigins: string[];
   private tunnelManager?: TunnelManager;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private streamSessionCleanupTimer: NodeJS.Timeout | null = null;
+  private bridgeCleanupTimer: NodeJS.Timeout | null = null;
   private clientCache: Map<string, {
     id: string,
     lastUsed: number,
     env?: Record<string, string>
   }> = new Map();
   private readonly CLIENT_CACHE_TTL = 5 * 60 * 1000; // five minutes caching time
+  private readonly CLEANUP_INTERVAL_DIVISOR = 3; // Run cleanup every TTL/3
+  private readonly streamSessionManager: StreamSessionManager;
+  private readonly streamableServers: Record<string, StreamableServerConfig>;
 
   constructor(config: Config, logger: Logger, mcpClient: MCPClientManager) {
     this.config = config;
@@ -27,21 +36,27 @@ export class HttpServer {
     
     EventEmitter.defaultMaxListeners = 15;
     
-    this.accessToken = process.env.ACCESS_TOKEN || '';
+    this.accessToken = this.config.security.authToken;
+    this.allowedOrigins = this.config.security.allowedOrigins;
     if (!this.accessToken) {
-      this.logger.warn('No ACCESS_TOKEN environment variable set. This is a security risk.');
+      this.logger.warn('No AUTH_TOKEN environment variable set. This is a security risk.');
     }
-    
+
     if (process.argv.includes('--tunnel')) {
       this.tunnelManager = new TunnelManager(logger);
     }
-    
+
+    this.streamableServers = this.config.streamable.servers;
+    this.streamSessionManager = new StreamSessionManager(
+      this.logger,
+      this.config.streamable.sessionTtlMs
+    );
+
     this.setupMiddleware();
     this.setupRoutes();
 
     this.setupHeartbeat();
-
-    setInterval(() => this.cleanupClientCache(), this.CLIENT_CACHE_TTL);
+    this.setupCleanupTimers();
   }
 
   private setupHeartbeat() {
@@ -60,6 +75,24 @@ export class HttpServer {
     }, 30000); 
   }
 
+  private setupCleanupTimers() {
+    // Check if cleanup is disabled via environment variable
+    const disableBridgeCleanup = process.env.DISABLE_BRIDGE_CLEANUP === 'true';
+
+    if (!disableBridgeCleanup) {
+      // Run bridge cleanup every TTL/3 to catch expired sessions more frequently
+      // This reduces the window where an expired session might still be used
+      const bridgeCleanupInterval = Math.floor(this.CLIENT_CACHE_TTL / this.CLEANUP_INTERVAL_DIVISOR);
+      this.bridgeCleanupTimer = setInterval(
+        () => this.cleanupClientCache(),
+        bridgeCleanupInterval
+      );
+      this.logger.info(`Bridge session cleanup enabled (interval: ${bridgeCleanupInterval}ms, TTL: ${this.CLIENT_CACHE_TTL}ms)`);
+    } else {
+      this.logger.warn('Bridge session cleanup is DISABLED - sessions will not be automatically cleaned up');
+    }
+  }
+
   private setupMiddleware(): void {
     // JSON body parser
     this.app.use(express.json());
@@ -71,6 +104,15 @@ export class HttpServer {
 
     // Bearer Token Authentication middleware
     this.app.use((req: Request, res: Response, next) => {
+      if (this.allowedOrigins.length > 0) {
+        const origin = req.headers.origin;
+        if (origin && !this.allowedOrigins.includes(origin)) {
+          this.logger.warn(`Rejected request due to origin mismatch: ${origin}`);
+          res.status(403).json({ error: 'Origin not allowed' });
+          return;
+        }
+      }
+
       const authHeader = req.headers.authorization;
       // If no auth header, check if access token is set
       if (this.accessToken) {
@@ -143,10 +185,8 @@ export class HttpServer {
             await this.mcpClient.executeRequest(cachedClient.id, 'ping', {});
             clientId = cachedClient.id;
             cachedClient.lastUsed = Date.now();
-            this.logger.debug(`Using cached client: ${clientId}`);
           } catch (error) {
             // If the connection is invalid, delete the cache and create a new one
-            this.logger.warn(`Cached client ${cachedClient.id} is invalid, creating new one`);
             await this.mcpClient.closeClient(cachedClient.id).catch(() => {});
             this.clientCache.delete(cacheKey);
             clientId = await this.mcpClient.createClient(serverPath, args, env);
@@ -164,7 +204,6 @@ export class HttpServer {
             lastUsed: Date.now(),
             env
           });
-          this.logger.info(`Created new client: ${clientId}`);
         }
 
         // Execute request
@@ -175,6 +214,28 @@ export class HttpServer {
         this.logger.error('Error processing bridge request:', error);
         res.status(500).json({ error: 'Failed to process request' });
       }
+    });
+
+    this.app.post('/mcp/:serverId', (req: Request, res: Response) => {
+      this.logger.info(`MCP request received for serverId: ${req.params.serverId}`);
+      void this.handleStreamablePost(req, res);
+    });
+
+    this.app.get('/mcp/:_serverId', (req: Request, res: Response) => {
+      res.status(405).json({ error: 'GET not supported for MCP endpoint' });
+    });
+
+    this.app.delete('/mcp/:_serverId', async (req: Request, res: Response) => {
+      const sessionIdHeader = req.header('mcp-session-id');
+      if (!sessionIdHeader) {
+        res.status(400).json({ error: 'mcp-session-id header required' });
+        return;
+      }
+
+      await this.streamSessionManager.closeSession(sessionIdHeader).catch((error) => {
+        this.logger.error('Failed to close session:', error);
+      });
+      res.status(204).end();
     });
   }
 
@@ -236,6 +297,11 @@ export class HttpServer {
       this.reconnectTimer = null;
     }
 
+    if (this.bridgeCleanupTimer) {
+      clearInterval(this.bridgeCleanupTimer);
+      this.bridgeCleanupTimer = null;
+    }
+
     // Close all cached clients
     const closePromises = Array.from(this.clientCache.values()).map(async (client) => {
       try {
@@ -247,25 +313,273 @@ export class HttpServer {
 
     await Promise.all(closePromises);
     this.clientCache.clear();
-    
+
+    if (this.streamSessionCleanupTimer) {
+      clearInterval(this.streamSessionCleanupTimer);
+      this.streamSessionCleanupTimer = null;
+    }
+
+    await this.streamSessionManager.closeAll();
+
     if (this.tunnelManager) {
       await this.tunnelManager.disconnect();
     }
   }
 
+  private getStreamableServer(serverId: string): StreamableServerConfig | undefined {
+    return this.streamableServers[serverId];
+  }
+
+  private acceptHeaderSupportsStreaming(headerValue: string | undefined): boolean {
+    if (!headerValue) {
+      return false;
+    }
+
+    const values = headerValue
+      .split(',')
+      .map((value) => value.split(';')[0].trim().toLowerCase())
+      .filter((value) => value.length > 0);
+
+    return values.includes('application/json') && values.includes('text/event-stream');
+  }
+
+  private isJsonRpcRequest(message: JSONRPCMessage): message is Extract<JSONRPCMessage, { method: string; id: unknown }> {
+    return (
+      typeof (message as { method?: unknown }).method === 'string' &&
+      Object.prototype.hasOwnProperty.call(message, 'id')
+    );
+  }
+
+  private isJsonRpcResponse(message: JSONRPCMessage): message is Extract<JSONRPCMessage, { id: unknown }> {
+    const hasId = Object.prototype.hasOwnProperty.call(message, 'id');
+    const hasResult = Object.prototype.hasOwnProperty.call(message, 'result');
+    const hasError = Object.prototype.hasOwnProperty.call(message, 'error');
+    return hasId && (hasResult || hasError) && !Object.prototype.hasOwnProperty.call(message, 'method');
+  }
+
+  private async handleStreamablePost(req: Request, res: Response): Promise<void> {
+    this.logger.info(`Streamable request received: ${req.method} ${req.originalUrl}`);
+    const serverId = req.params.serverId;
+    const serverConfig = this.getStreamableServer(serverId);
+    if (!serverConfig) {
+      this.logger.warn(`Streamable request received for unknown serverId: ${serverId}`);
+      res.status(404).json({ error: `Unknown MCP server: ${serverId}` });
+      return;
+    }
+    if (!this.acceptHeaderSupportsStreaming(req.headers.accept)) {
+      res.status(406).json({ error: 'Accept header must include application/json and text/event-stream' });
+      return;
+    }
+
+    const payload = req.body;
+    const messages = Array.isArray(payload) ? payload : [payload];
+    if (!messages || messages.length === 0) {
+      res.status(400).json({ error: 'Request body must include at least one JSON-RPC message' });
+      return;
+    }
+
+    if (messages.some((message) => typeof message !== 'object' || message === null)) {
+      res.status(400).json({ error: 'Each JSON-RPC message must be an object' });
+      return;
+    }
+    const normalizedMessages = messages as JSONRPCMessage[];
+    const hasRequests = normalizedMessages.some((message) => this.isJsonRpcRequest(message));
+    const sessionHeader = req.header('mcp-session-id');
+
+    let session: StreamSession | undefined;
+    let sessionId: string;
+
+    try {
+      this.logger.info(`Session header: ${sessionHeader}, hasRequests: ${hasRequests}`);
+      if (!sessionHeader) {
+        if (!hasRequests) {
+          res.status(400).json({ error: 'mcp-session-id header required when request body has no requests' });
+          return;
+        }
+
+        session = await this.streamSessionManager.createSession(serverId, serverConfig);
+        sessionId = session.id;
+      } else {
+        session = this.streamSessionManager.getSession(sessionHeader, serverId);
+        if (!session) {
+          res.status(404).json({ error: 'Session not found' });
+          return;
+        }
+        await session.ensureStarted();
+        sessionId = sessionHeader;
+      }
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to establish session with MCP server' });
+      return;
+    }
+    res.setHeader('mcp-session-id', sessionId);
+
+    const forwardMessages = async () => {
+      for (const message of normalizedMessages) {
+        await session!.send(message);
+      }
+    };
+
+    if (!hasRequests) {
+      try {
+        await forwardMessages();
+        res.status(202).end();
+      } catch (error) {
+        res.status(500).json({ error: 'Failed to forward messages to MCP server' });
+      }
+      return;
+    }
+
+    res.status(200);
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    if (typeof (res as any).flushHeaders === 'function') {
+      (res as any).flushHeaders();
+    } else {
+      res.write('\n');
+    }
+
+    const pendingIds = new Set<string>();
+    for (const message of normalizedMessages) {
+      if (this.isJsonRpcRequest(message)) {
+        pendingIds.add(String(message.id));
+      }
+    }
+
+    let streamClosed = false;
+    let eventCounter = 0;
+
+    const writeEvent = (payload: unknown, eventType = 'message') => {
+      if (streamClosed || res.writableEnded) {
+        return;
+      }
+      try {
+        res.write(`event: ${eventType}\n`);
+        res.write(`id: ${++eventCounter}\n`);
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch (error) {
+        this.logger.error('Error writing SSE frame:', error);
+      }
+    };
+
+    const cleanup = () => {
+      if (streamClosed) {
+        return;
+      }
+      streamClosed = true;
+      session?.off('message', onSessionMessage);
+      session?.off('error', onSessionError);
+      session?.off('close', onSessionClose);
+      req.off('close', onClientClose);
+      if (!res.writableEnded) {
+        res.end();
+      }
+    };
+
+    const deliverMessage = (message: JSONRPCMessage) => {
+      let shouldCloseAfterWrite = false;
+      if (this.isJsonRpcResponse(message)) {
+        const key = String(message.id);
+        if (!pendingIds.has(key)) {
+          return;
+        }
+        pendingIds.delete(key);
+        shouldCloseAfterWrite = pendingIds.size === 0;
+      }
+
+      writeEvent(message);
+
+      if (shouldCloseAfterWrite) {
+        cleanup();
+      }
+    };
+
+    const onSessionMessage = (payload: JSONRPCMessage | JSONRPCMessage[]) => {
+      if (Array.isArray(payload)) {
+        payload.forEach((message) => deliverMessage(message));
+      } else {
+        deliverMessage(payload);
+      }
+    };
+
+    const onSessionError = (error: Error) => {
+      // Emit JSON-RPC error responses for all pending request IDs
+      const errMsg = error?.message ?? 'Stream session error';
+      const errorCode = 32603; // JSON-RPC internal error
+      if (pendingIds.size === 0) {
+        // If we don't have any pending IDs, emit a synthetic message to help clients notice the failure
+        // Note: JSON-RPC responses should carry an id; when none is available, clients may simply close.
+        // We prefer not to send a nonstandard SSE event type.
+        writeEvent({ jsonrpc: '2.0', error: { code: errorCode, message: errMsg } });
+      } else {
+        for (const id of Array.from(pendingIds)) {
+          writeEvent({ jsonrpc: '2.0', id, error: { code: errorCode, message: errMsg } });
+        }
+        pendingIds.clear();
+      }
+      cleanup();
+    };
+
+    const onSessionClose = () => {
+      cleanup();
+    };
+
+    const onClientClose = () => {
+      cleanup();
+    };
+
+    session.on('message', onSessionMessage);
+    session.on('error', onSessionError);
+    session.on('close', onSessionClose);
+    req.on('close', onClientClose);
+
+    try {
+      await forwardMessages();
+    } catch (error) {
+      this.logger.error('Failed to forward JSON-RPC request batch:', error);
+      const errMsg = error instanceof Error ? error.message : 'Failed to forward request to MCP server';
+      const errorCode = 32603; // JSON-RPC internal error
+      if (pendingIds.size === 0) {
+        writeEvent({ jsonrpc: '2.0', error: { code: errorCode, message: errMsg } });
+      } else {
+        for (const id of Array.from(pendingIds)) {
+          writeEvent({ jsonrpc: '2.0', id, error: { code: errorCode, message: errMsg } });
+        }
+        pendingIds.clear();
+      }
+      cleanup();
+    }
+  }
+
   private async cleanupClientCache(): Promise<void> {
     const now = Date.now();
+    const expiredClients: Array<{ key: string; clientId: string; idleTime: number }> = [];
+
+    // First pass: identify expired clients
     for (const [key, value] of this.clientCache.entries()) {
+      const idleTime = now - value.lastUsed;
+      if (idleTime > this.CLIENT_CACHE_TTL) {
+        expiredClients.push({ key, clientId: value.id, idleTime });
+      }
+    }
+
+    if (expiredClients.length === 0) {
+      return;
+    }
+
+    this.logger.info(`Cleaning up ${expiredClients.length} expired bridge client(s)`);
+
+    // Second pass: close expired clients
+    for (const { key, clientId, idleTime } of expiredClients) {
       try {
-        if (now - value.lastUsed > this.CLIENT_CACHE_TTL) {
-          await this.mcpClient.closeClient(value.id).catch(err => {
-            this.logger.error(`Error closing client ${value.id}:`, err);
-          });
-          this.clientCache.delete(key);
-          this.logger.debug(`Cleaned up cached client: ${key}`);
-        }
+        this.logger.debug(`Closing bridge client ${clientId} (idle for ${Math.floor(idleTime / 1000)}s)`);
+        await this.mcpClient.closeClient(clientId).catch(err => {
+          this.logger.error(`Error closing client ${clientId}:`, err);
+        });
+        this.clientCache.delete(key);
       } catch (error) {
-        this.logger.error(`Error during cleanup for client ${value.id}:`, error);
+        this.logger.error(`Error during cleanup for client ${clientId}:`, error);
         this.clientCache.delete(key);
       }
     }

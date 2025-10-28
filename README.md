@@ -1,5 +1,4 @@
 # MCP Connect
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
     ███╗   ███╗ ██████╗██████╗      ██████╗ ██████╗ ███╗   ██╗███╗   ██╗███████╗ ██████╗████████╗
     ████╗ ████║██╔════╝██╔══██╗    ██╔════╝██╔═══██╗████╗  ██║████╗  ██║██╔════╝██╔════╝╚══██╔══╝
@@ -8,191 +7,356 @@
     ██║ ╚═╝ ██║╚██████╗██║         ╚██████╗╚██████╔╝██║ ╚████║██║ ╚████║███████╗╚██████╗   ██║   
     ╚═╝     ╚═╝ ╚═════╝╚═╝          ╚═════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═══╝╚══════╝ ╚═════╝   ╚═╝   
 
-The Model Context Protocol (MCP) introduced by Anthropic is cool. However, most MCP servers are built on Stdio transport, which, while excellent for accessing local resources, limits their use in cloud-based applications.
 
-MCP Connect is a tiny tool that is created to solve this problem:
+<div align="center">
 
-- **Cloud Integration**: Enables cloud-based AI services to interact with local Stdio based MCP servers
-- **Protocol Translation**: Converts HTTP/HTTPS requests to Stdio communication
-- **Security**: Provides secure access to local resources while maintaining control
-- **Flexibility**: Supports various MCP servers without modifying their implementation
-- **Easy to use**: Just run MCP Connect locally, zero modification to the MCP server
-- **Tunnel**: Built-in support for Ngrok tunnel
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.4+-blue)](https://www.typescriptlang.org/)
 
-By bridging this gap, we can leverage the full potential of local MCP tools in cloud-based AI applications without compromising on security.
+**Lightweight bridge that exposes local MCP servers as HTTP APIs**
 
-## How it works
+</div>
+
+---
+
+## What Is MCP Connect?
+
+MCP Connect is an HTTP gateway that lets you call local MCP servers (that speak stdio) through Streamable HTTP or a classic request/response bridge.
+
+### What's New
+
+- Added Streamable HTTP mode on top of the classic request/response bridge
+- New quick-deploy scripts and configs under `deploy/e2b` for launching in an E2B sandbox
+
+## How It Works
 
 ```
-+-----------------+     HTTPS/SSE      +------------------+      stdio      +------------------+
-|                 |                    |                  |                 |                  |
-|  Cloud AI tools | <--------------->  |  Node.js Bridge  | <------------>  |    MCP Server    |
-|   (Remote)      |       Tunnels      |    (Local)       |                 |     (Local)      |
-|                 |                    |                  |                 |                  |
-+-----------------+                    +------------------+                 +------------------+
++-----------------+   HTTP (JSON)               +------------------+      stdio      +------------------+
+|                 |   /bridge                   |                  |                 |                  |
+|  Cloud AI tools | <------------------------>  |  Node.js Bridge  | <------------>  |    MCP Server    |
+|   (Remote)      |                             |    (Local)       |                 |     (Local)      |
+|                 |   HTTP (SSE stream)         |                  |                 |                  |
+|                 |   /mcp/:serverId            |                  |                 |                  |
++-----------------+         Tunnels (optional)  +------------------+                 +------------------+
 ```
 
-## Prerequisites
+**Key Features**
 
-- Node.js
+| Feature | Description |
+|--------|-------------|
+| 🚀 Dual modes | Call local stdio MCP servers via Streamable HTTP or the classic HTTP bridge |
+| 🔄 Session management | Maintain conversational continuity with sessions |
+| 🔐 Security | Bearer token auth + CORS allowlist |
+| 🌐 Public access | Built-in Ngrok tunnel to expose endpoints externally |
+| ☁️ Cloud deploy | One-click deploy to E2B cloud sandbox |
+---
 
 ## Quick Start
 
-1. Clone the repository
-   ```bash
-   git clone https://github.com/EvalsOne/MCP-connect.git
-   ```
-   and enter the directory
-   ```bash
-   cd MCP-connect
-   ```
-2. Copy `.env.example` to `.env` and configure the port and auth_token:
-   ```bash
-   cp .env.example .env
-   ```
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-4. Run MCP Connect
-   ```bash
-   # build MCP Connect
-   npm run build
-   # run MCP Connect
-   npm run start
-   # or, run in dev mode (supports hot reloading by nodemon)
-   npm run dev
-   ```
-Now MCP connect should be running on `http://localhost:3000/bridge`.
+### Prerequisites
 
-Note:
-- The bridge is designed to be run on a local machine, so you still need to build a tunnel to the local MCP server that is accessible from the cloud.
-- Ngrok, Cloudflare Zero Trust, and LocalTunnel are recommended for building the tunnel.
+- Node.js >= 22.0.0 (recommended)
+- npm or yarn
 
-## Running with Ngrok Tunnel
+### 1) Install
 
-MCP Connect has built-in support for Ngrok tunnel. To run the bridge with a public URL using Ngrok:
+```bash
+git clone https://github.com/EvalsOne/MCP-connect.git
+cd mcp-connect
+npm install
+```
 
-1. Get your Ngrok auth token from https://dashboard.ngrok.com/authtokens
-2. Add to your .env file:
-   ```
-   NGROK_AUTH_TOKEN=your_ngrok_auth_token
-   ```
-3. Run with tunnel:
-   ```bash
-   # Production mode with tunnel
-   npm run start:tunnel
-   
-   # Development mode with tunnel
-   npm run dev:tunnel
-   ``` 
-After MCP Connect is running, you can see the MCP bridge URL in the console.
+### 2) Preparations
 
-## API Endpoints
+**A. Set up initial environment variables**
 
-After MCP Connect is running, there are two endpoints exposed:
+```bash
+cp .env.example .env
+```
 
-- `GET /health`: Health check endpoint
-- `POST /bridge`: Main bridge endpoint for receiving requests from the cloud
+**B. Configure MCP servers** (For Streamable HTTP method)
 
-For example, the following is a configuration of the official [GitHub MCP](https://github.com/modelcontextprotocol/servers/tree/main/src/github):
+```bash
+cp mcp-servers.example.json mcp-servers.json
+vim mcp-servers.json  # edit config to add more MCP servers support.
+```
+
+### 3) Run
+
+```bash
+# Build and start
+npm run build
+npm start
+
+# Or use dev mode (hot reload)
+npm run dev
+
+# Enable Ngrok tunnel
+npm run start:tunnel
+```
+
+After you see the startup banner, visit http://localhost:3000/health to check server status.
+
+
+---
+
+## Usage
+
+### Mode 1: Streamable HTTP bridge
+
+General-purpose and compatible with any MCP client that supports Streamable HTTP.
+
+In Streamable HTTP mode, each MCP server is assigned a unique route. Example: add the `fetch` MCP server in `mcp-servers.json`.
 
 ```json
 {
-  "command": "npx",
-  "args": [
-    "-y",
-    "@modelcontextprotocol/server-github"
-  ],
-  "env": {
-    "GITHUB_PERSONAL_ACCESS_TOKEN": "<your_github_personal_access_token>"
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "description": "HTTP/HTTPS content fetcher"
+    }
   }
 }
 ```
 
-You can send a request to the bridge as the following to list the tools of the MCP server and call a specific tool.
+Once started, access the `fetch` MCP server with your favorite MCP client (e.g. Claude Code, Cursor, Codex, GitHub Copilot...)
 
-**Listing tools:**
+```
+http://localhost:3000/mcp/fetch
+```
+
+Note: You must configure `mcp-servers.json` before starting the service, otherwise the server won't be available.
+
+---
+
+### Mode 2: Classic request/response bridge
+
+Non-standard invocation where you implement methods like `tools/list`, `tools/call`, etc.
+
+Include ``Authorization: Bearer <token>`` in request header if `ACCESS_TOKEN` is set in .env file
+
+#### Example 1: List available tools
 
 ```bash
 curl -X POST http://localhost:3000/bridge \
-     -d '{
-       "method": "tools/list",
-       "serverPath": "npx",
-       "args": [
-         "-y",
-         "@modelcontextprotocol/server-github"
-       ],
-       "params": {},
-       "env": {
-         "GITHUB_PERSONAL_ACCESS_TOKEN": "<your_github_personal_access_token>"
-       }
-     }'
+  -H "Authorization: Bearer your-secret-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "serverPath": "uvx",
+    "args": ["mcp-server-fetch"],
+    "method": "tools/list",
+    "params": {}
+  }'
 ```
 
-**Calling a tool:**
-
-Using the search_repositories tool to search for repositories related to modelcontextprotocol
+#### Example 2: Call a tool
 
 ```bash
 curl -X POST http://localhost:3000/bridge \
-     -d '{
-       "method": "tools/call",
-       "serverPath": "npx",
-       "args": [
-         "-y",
-         "@modelcontextprotocol/server-github"
-       ],
-       "params": {
-         "name": "search_repositories",
-         "arguments": {
-            "query": "modelcontextprotocol"
-         },
-       },
-       "env": {
-         "GITHUB_PERSONAL_ACCESS_TOKEN": "<your_github_personal_access_token>"
-       }
-     }'
+  -H "Authorization: Bearer your-secret-token-here" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "serverPath": "uvx",
+    "args": ["mcp-server-fetch"],
+    "method": "tools/call",
+    "params": {
+      "name": "fetch",
+      "arguments": {
+        "url": "https://example.com"
+      }
+    }
+  }'
 ```
 
-## Authentication
+### Security
 
-MCP Connect uses a simple token-based authentication system. The token is stored in the `.env` file. If the token is set, MCP Connect will use it to authenticate the request.
-
-Sample request with token:
+#### Authentication
+MCP Connect uses a simple token-based authentication system. The token is stored in the .env file. If the token is set, MCP Connect will use it to authenticate the request.
 
 ```bash
-curl -X POST http://localhost:3000/bridge \
-     -H "Authorization: Bearer <your_auth_token>" \
-     -d '{
-       "method": "tools/list",
-       "serverPath": "npx",
-       "args": [
-         "-y",
-         "@modelcontextprotocol/server-github"
-       ],
-       "params": {},
-       "env": {
-         "GITHUB_PERSONAL_ACCESS_TOKEN": "<your_github_personal_access_token>"
-       }
-     }'
+Authorization: Bearer <your_auth_token>
 ```
 
-## Configuration
+#### Allowed Origins
+In production, set `ALLOWED_ORIGINS` to restrict cross-origin requests:
 
-Required environment variables:
+```env
+ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
+```
 
-- `AUTH_TOKEN`: Authentication token for the bridge API (Optional)
-- `PORT`: HTTP server port (default: 3000, required)
-- `LOG_LEVEL`: Logging level (default: info, required)
-- `NGROK_AUTH_TOKEN`: Ngrok auth token (Optional)
+If `ALLOWED_ORIGINS` is set, non-matching origins are rejected.
 
-## Using MCP Connect with ConsoleX AI to access local MCP Server
+---
 
-The following is a demo of using MCP Connect to access a local MCP Server on [ConsoleX AI](https://consolex.ai):
+## API Reference
 
-[![MCP Connect Live Demo](readme/thumbnail.png)](https://github-production-user-asset-6210df.s3.amazonaws.com/6077178/400736575-19dec583-7911-4221-bd87-3e6032ea7732.mp4)
+### `GET /health`
 
-## License
+Health check endpoint (no auth required)
 
-MIT License
+Response:
+```json
+{"status": "ok"}
+```
+
+---
+
+
+### `POST /mcp/:serverId`
+
+Streaming HTTP mode
+
+Path params:
+- `serverId`: server ID defined in `MCP_SERVERS`
+
+Headers:
+- `Authorization: Bearer <token>` (if `ACCESS_TOKEN` is set)
+- `Accept: application/json, text/event-stream` (required)
+- `mcp-session-id: <session-id>` (optional, reuse existing session)
+
+Body:
+```json
+[
+  {"jsonrpc":"2.0","id":"1","method":"tools/list","params":{}},
+  {"jsonrpc":"2.0","method":"notifications/initialized"}
+]
+```
+
+---
+
+### `POST /bridge`
+
+Original request/response bridge mode
+
+Headers:
+- `Authorization: Bearer <token>` (if `ACCESS_TOKEN` is set)
+- `Content-Type: application/json`
+
+Body:
+```json
+{
+  "serverPath": "Executable command or URL (http/https/ws/wss)",
+  "method": "JSON-RPC method name",
+  "params": {},
+  "args": ["optional command-line args"],
+  "env": {"OPTIONAL_ENV_VAR": "value"}
+}
+```
+
+Supported methods:
+- `tools/list`, `tools/call`
+- `prompts/list`, `prompts/get`
+- `resources/list`, `resources/read`
+- `resources/subscribe`, `resources/unsubscribe`
+- `completion/complete`
+- `logging/setLevel`
+
+---
+
+## Expose Publicly via Ngrok
+
+1. Get a token: https://dashboard.ngrok.com/get-started/your-authtoken
+
+2. Add to `.env`:
+   ```env
+   NGROK_AUTH_TOKEN=your-token-here
+   ```
+
+3. Start the service:
+   ```bash
+   npm run start:tunnel
+   ```
+
+4. The console will show public URLs:
+   ```
+   Tunnel URL: https://abc123.ngrok.io
+   MCP Bridge URL: https://abc123.ngrok.io/bridge
+   ```
+
+---
+
+## Quick Deploy to E2B Sandbox
+
+E2B provides isolated cloud sandboxes, ideal for running untrusted MCP servers safely.
+
+### Step 1: Prepare E2B environment
+
+```bash
+# Sign up at https://e2b.dev and get an API key
+pip install e2b
+export E2B_API_KEY=your-e2b-api-key
+```
+
+### Step 2: Build sandbox templates
+
+```bash
+cd deploy/e2b
+python build_dev.py   # dev
+python build_prod.py  # prod
+```
+
+### Step 3: Launch from template
+
+```bash
+python sandbox_deploy.py --template-id mcp-dev-gui
+```
+
+See：[E2B deployment guide](deploy/e2b/README.md) for details.
+
+---
+
+## Logging & Monitoring
+
+### Log files
+
+- `combined.log`: all levels
+- `error.log`: error level only
+
+### Levels
+
+Control verbosity via `LOG_LEVEL`:
+
+```env
+LOG_LEVEL=DEBUG  # development
+LOG_LEVEL=INFO   # production (default)
+LOG_LEVEL=WARN   # warnings + errors
+```
+
+---
+
+## Development
+
+### Project layout
+
+```
+src/
+├── server/
+│   └── http-server.ts      # HTTP server and routes
+├── client/
+│   └── mcp-client-manager.ts  # MCP client manager
+├── stream/
+│   ├── session-manager.ts   # session lifecycle
+│   └── stream-session.ts    # SSE session implementation
+├── config/
+│   └── config.ts            # config loading & validation
+├── utils/
+│   ├── logger.ts            # Winston logger
+│   └── tunnel.ts            # Ngrok tunnel management
+└── index.ts                 # entry point
+```
+
+---
+
+## Contributing
+
+Issues and PRs are welcome!
+
+---
+
+<div align="center">
+
+**If this project helps you, please ⭐️ Star it!**
+
+</div>
