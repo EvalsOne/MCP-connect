@@ -77,6 +77,8 @@ class SandboxConfig:
     # Optional: heartbeat to keep sandbox/public URL active (seconds, 0 to disable)
     keepalive_interval: int = 60
     platform_keepalive_interval: int = 120
+    # Health probing: by default only probe HTTPS (443); disable HTTP (80)
+    probe_http: bool = False
     display: str = ":99"
     xvfb_resolution: str = "1920x1080x24"
     vnc_port: int = 5900
@@ -439,7 +441,8 @@ class E2BSandboxManager:
 
         # Ensure startup.sh exists and use it to bootstrap services (Xvfb/x11vnc/noVNC/nginx/etc.)
         # Headless mode: skip GUI bootstrap entirely; ensure nginx + mcp-connect only
-        if self.config.headless:
+        # Enable for explicit flag or for headless-like templates (simple/minimal)
+        if self.config.headless or self._template_indicates_headless(self.config.template_id):
             logger.info("Headless mode enabled: skipping GUI/noVNC/VNC services")
             # Proactively stop any GUI services the image entrypoint may have launched
             stop_gui_cmds = [
@@ -819,15 +822,16 @@ class E2BSandboxManager:
                             healthy_url = https_url
                     except Exception:
                         pass
-                    # HTTP
-                    try:
-                        resp = await client.get(f"{http_url}/health")
-                        if resp.status_code == 200:
-                            http_ok = True
-                            if healthy_url is None:
-                                healthy_url = http_url
-                    except Exception:
-                        pass
+                    # Optional HTTP probe
+                    if self.config.probe_http:
+                        try:
+                            resp = await client.get(f"{http_url}/health")
+                            if resp.status_code == 200:
+                                http_ok = True
+                                if healthy_url is None:
+                                    healthy_url = http_url
+                        except Exception:
+                            pass
 
             except Exception:
                 # ignore session-level errors; we'll retry
@@ -839,9 +843,14 @@ class E2BSandboxManager:
                 )
                 return {"https_ok": https_ok, "http_ok": http_ok, "healthy_url": healthy_url}
 
-            logger.debug(
-                f"Attempt {attempt + 1}/{max_attempts}: Services not ready yet (https={https_url}, http={http_url})"
-            )
+            if self.config.probe_http:
+                logger.debug(
+                    f"Attempt {attempt + 1}/{max_attempts}: Services not ready yet (https={https_url}, http={http_url})"
+                )
+            else:
+                logger.debug(
+                    f"Attempt {attempt + 1}/{max_attempts}: Services not ready yet (https={https_url})"
+                )
             await asyncio.sleep(delay)
 
         logger.warning(
@@ -985,7 +994,7 @@ class E2BSandboxManager:
                     return
                 sandbox = entry["sandbox"]
                 https_url = self._get_public_url(sandbox, secure=True)
-                http_url = self._get_public_url(sandbox, secure=False)
+                http_url = self._get_public_url(sandbox, secure=False) if self.config.probe_http else None
 
                 https_ok = False
                 http_ok = False
@@ -995,17 +1004,24 @@ class E2BSandboxManager:
                         https_ok = (r1.status_code == 200)
                     except Exception:
                         https_ok = False
-                    try:
-                        r2 = await client.get(f"{http_url}/health")
-                        http_ok = (r2.status_code == 200)
-                    except Exception:
-                        http_ok = False
+                    if http_url:
+                        try:
+                            r2 = await client.get(f"{http_url}/health")
+                            http_ok = (r2.status_code == 200)
+                        except Exception:
+                            http_ok = False
 
                 if https_ok or http_ok:
-                    chosen = https_url if https_ok else http_url
-                    logger.debug("Keepalive OK for %s (https=%s, http=%s)", sandbox_id, https_ok, http_ok)
+                    chosen = https_url if https_ok else (http_url or "")
+                    if self.config.probe_http:
+                        logger.debug("Keepalive OK for %s (https=%s, http=%s)", sandbox_id, https_ok, http_ok)
+                    else:
+                        logger.debug("Keepalive OK for %s (https=%s)", sandbox_id, https_ok)
                 else:
-                    logger.warning("Keepalive probe failed for %s (https=%s, http=%s)", sandbox_id, https_ok, http_ok)
+                    if self.config.probe_http:
+                        logger.warning("Keepalive probe failed for %s (https=%s, http=%s)", sandbox_id, https_ok, http_ok)
+                    else:
+                        logger.warning("Keepalive probe failed for %s (https=%s)", sandbox_id, https_ok)
                 await asyncio.sleep(interval)
             except asyncio.CancelledError:
                 return
@@ -1086,6 +1102,7 @@ async def main():
     parser.add_argument("--auth-token", dest="auth_token", default=None, help="Bearer token for bridge API auth (maps to AUTH_TOKEN)")
     parser.add_argument("--no-remote-fetch", action="store_true", help="Disable fetching startup.sh and configs from remote base")
     parser.add_argument("--remote-base", default=None, help="Remote base URL to fetch assets (e.g. https://raw.githubusercontent.com/<org>/<repo>/<branch>/deploy/e2b)")
+    parser.add_argument("--probe-http", action="store_true", help="Also probe HTTP (port 80) /health alongside HTTPS during readiness and keepalive")
     args = parser.parse_args()
 
     template_id = (args.template_id or os.getenv("E2B_TEMPLATE_ID", "")).strip()
@@ -1111,6 +1128,8 @@ async def main():
         config.remote_base = args.remote_base
     if args.xvfb_resolution:
         config.xvfb_resolution = args.xvfb_resolution
+    if args.probe_http:
+        config.probe_http = True
     manager = E2BSandboxManager(config)
     logger.info("Creating E2B sandbox (template=%s sandbox_id=%s)...", template_id, args.sandbox_id)
     result = await manager.create_sandbox(
@@ -1147,7 +1166,8 @@ async def main():
     print("\n⌨️  Press Ctrl+C to stop the sandbox...")
     try:
         await asyncio.sleep(3600)  # Keep running for 1 hour max
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        # Gracefully handle both direct KeyboardInterrupt and asyncio task cancellation
         print("\n🛑 Stopping sandbox...")
         await manager.stop_all_sandboxes()
         print("✅ Sandbox stopped")
@@ -1160,5 +1180,9 @@ if __name__ == "__main__":
         print("  export E2B_API_KEY='your-api-key-here'")
         sys.exit(1)
 
-    # Run the main function
-    asyncio.run(main())
+    # Run the main function; swallow top-level KeyboardInterrupt to avoid noisy trace
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # Already handled inside main; exit quietly
+        pass

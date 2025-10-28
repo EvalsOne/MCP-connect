@@ -95,7 +95,7 @@ async def main(args: Optional[argparse.Namespace] = None) -> None:
     print("  e2b template list")
     print("To show a specific template:")
     print(f"  e2b template show {args.alias}")
-    print("\nUse the resulting template ID with e2b_sandbox_manager.py --template-id <id>")
+    print("\nUse the resulting template ID with sandbox_deploy.py --template-id <id>")
 
 
 if __name__ == "__main__":

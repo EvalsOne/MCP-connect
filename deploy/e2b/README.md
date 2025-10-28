@@ -7,7 +7,13 @@ Run MCP Bridge in an isolated E2B cloud sandbox environment.
 ### 1) Install dependencies
 
 ```bash
-pip install e2b
+# set up and activate virual environment
+cd deploy/e2b
+python -m venv venv
+source venv/bin/activate
+
+# install dependencies
+pip install -r requirements.txt
 ```
 
 ### 2) Set API key
@@ -88,7 +94,7 @@ Run the prebuilt quickstart script:
 
 ```bash
 # Full mode (with desktop GUI and Chrome)
-python sandbox_deploy.py --template-id <template-id-or-alias>
+python sandbox_deploy.py --template-id <template-id-or-alias> --auth-token <token>
 ```
 
 This script will:
@@ -127,6 +133,7 @@ These map to `deploy/e2b/sandbox_deploy.py` CLI options (the script falls back t
 - `--headless`
   - What: lightweight headless mode; skip Xvfb/fluxbox/Chrome/VNC/noVNC, keep Nginx + MCP-connect
   - Default: off (GUI mode)
+  - Note: templates or aliases containing `simple` or `minimal` are treated as headless by default.
 
 - `--auth-token`
   - What: sets the bridge API Bearer token. When omitted, the deploy flow prefers `E2B_MCP_AUTH_TOKEN` from the environment, then falls back to `AUTH_TOKEN` for compatibility. Requests must include `Authorization: Bearer <token>` when set.
@@ -139,6 +146,10 @@ These map to `deploy/e2b/sandbox_deploy.py` CLI options (the script falls back t
 - `--remote-base`
   - What: remote base URL used when fetching assets (e.g. `https://raw.githubusercontent.com/<org>/<repo>/<branch>/deploy/e2b`)
   - Default: `https://raw.githubusercontent.com/EvalsOne/MCP-bridge/main/deploy/e2b`
+
+- `--probe-http`
+  - What: also probe HTTP (port 80) `/health` alongside HTTPS during readiness and keepalive.
+  - Default: off. By default, the manager only probes HTTPS to reduce noise when HTTP is not routed.
 
 Important environment variables
 
@@ -194,7 +205,7 @@ python sandbox_deploy.py --template-id mcp-xyz123 --sandbox-id demo1
 | `startup.sh` | Sandbox startup script |
 | `nginx.conf` | Nginx reverse proxy config |
 | `view_sandbox_logs.py` | Exec into sandbox for debug |
-| `e2b_sandbox_manager.py` | Sandbox management tool |
+| `sandbox_deploy.py` | Sandbox management tool |
 
 ---
 
@@ -202,14 +213,14 @@ python sandbox_deploy.py --template-id mcp-xyz123 --sandbox-id demo1
 
 ### Manage sandbox instances
 
-New `e2b_sandbox_manager.py` supports:
+New `sandbox_deploy.py` supports:
 
 ```bash
 # Create a sandbox (template ID or alias)
-python e2b_sandbox_manager.py --template-id <template-or-alias> --sandbox-id demo1
+python sandbox_deploy.py --template-id <template-or-alias> --sandbox-id demo1
 
 # Disable waiting for health / disable internet
-python e2b_sandbox_manager.py --template-id <template-or-alias> --no-wait --no-internet
+python sandbox_deploy.py --template-id <template-or-alias> --no-wait --no-internet
 ```
 
 ### Exec into sandbox for debug
