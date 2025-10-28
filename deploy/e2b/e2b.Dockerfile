@@ -116,7 +116,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 USER user
 WORKDIR /home/user
 
-RUN git clone -b dev_streamable_http --single-branch https://github.com/EvalsOne/MCP-connect.git /home/user/mcp-connect && \
+RUN git clone https://github.com/EvalsOne/MCP-connect.git /home/user/mcp-connect && \
     cd /home/user/mcp-connect && \
     npm install && \
     npm run build

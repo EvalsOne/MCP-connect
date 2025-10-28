@@ -16,8 +16,6 @@
 
 **Lightweight bridge that exposes local MCP servers as HTTP APIs**
 
-[English](README.md) • [简体中文](docs/README.zh-CN.md)
-
 </div>
 
 ---
@@ -69,44 +67,19 @@ cd mcp-connect
 npm install
 ```
 
-### 2) Configure
+### 2) Preparations
 
-**A. Environment variables**
+**A. Set up initial environment variables**
 
 ```bash
 cp .env.example .env
-vim .env  # edit config
 ```
 
-```env
-# Server port
-PORT=3000
-
-# Access token (strongly recommended!)
-ACCESS_TOKEN=your-secret-token-here
-
-# Optional: Ngrok token (for public exposure)
-NGROK_AUTH_TOKEN=your-ngrok-token
-```
-
-**B. Configure MCP servers**
+**B. Configure MCP servers** (For Streamable HTTP method)
 
 ```bash
 cp mcp-servers.example.json mcp-servers.json
-vim mcp-servers.json  # edit config
-```
-
-```json
-{
-  "mcpServers": {
-    "fetch": {
-      "command": "uvx",
-      "args": ["mcp-server-fetch"],
-      "description": "HTTP/HTTPS content fetcher"
-    }
-  },
-  ......
-}
+vim mcp-servers.json  # edit config to add more MCP servers support.
 ```
 
 ### 3) Run
@@ -130,7 +103,7 @@ After you see the startup banner, visit http://localhost:3000/health to check se
 
 ## Usage
 
-### Mode 1: Streamable HTTP
+### Mode 1: Streamable HTTP bridge
 
 General-purpose and compatible with any MCP client that supports Streamable HTTP.
 
@@ -158,9 +131,11 @@ Note: You must configure `mcp-servers.json` before starting the service, otherwi
 
 ---
 
-### Mode 2: Classic Bridge
+### Mode 2: Classic request/response bridge
 
 Non-standard invocation where you implement methods like `tools/list`, `tools/call`, etc.
+
+Include ``Authorization: Bearer <token>`` in request header if `ACCESS_TOKEN` is set in .env file
 
 #### Example 1: List available tools
 
@@ -231,7 +206,7 @@ Response:
 
 ### `POST /mcp/:serverId`
 
-Streaming session mode
+Streaming HTTP mode
 
 Path params:
 - `serverId`: server ID defined in `MCP_SERVERS`
@@ -253,7 +228,7 @@ Body:
 
 ### `POST /bridge`
 
-Original bridge mode
+Original request/response bridge mode
 
 Headers:
 - `Authorization: Bearer <token>` (if `ACCESS_TOKEN` is set)
@@ -328,7 +303,7 @@ python build_prod.py  # prod
 python sandbox_deploy.py --template-id mcp-dev-gui
 ```
 
-See `deploy/e2b` scripts for details.
+See：[E2B deployment guide](deploy/e2b/README.md) for details.
 
 ---
 

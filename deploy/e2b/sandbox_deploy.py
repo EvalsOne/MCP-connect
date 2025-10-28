@@ -523,7 +523,7 @@ class E2BSandboxManager:
         fetch_remote = os.getenv("E2B_FETCH_REMOTE", "1").strip() in ("1", "true", "TRUE")
         remote_base = os.getenv(
             "E2B_REMOTE_BASE",
-            "https://raw.githubusercontent.com/EvalsOne/MCP-bridge/dev_streamable_http/deploy/e2b",
+            "https://raw.githubusercontent.com/EvalsOne/MCP-bridge/main/deploy/e2b",
         )
 
         # Try to load resources from packaged e2b_mcp_sandbox if not present next to this file

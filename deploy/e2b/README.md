@@ -2,14 +2,12 @@
 
 Run MCP Bridge in an isolated E2B cloud sandbox environment.
 
-[English](README.md) • [简体中文](README.zh-CN.md)
-
 ## ⚡ Quick Start
 
 ### 1) Install dependencies
 
 ```bash
-pip install e2b requests
+pip install e2b
 ```
 
 ### 2) Set API key
@@ -25,10 +23,10 @@ export E2B_API_KEY=your-api-key-here
 ```bash
 cd deploy/e2b
 
-# 开发环境
+# For development environment
 python build_dev.py
 
-# 或生产环境
+# For production environment
 python build_prod.py
 ```
 
@@ -45,11 +43,20 @@ Parameters
   - Example: `--dockerfile e2b.Dockerfile.minimal`
 
 - `--alias`
-  - What: assign a human-friendly alias to the built template. Defaults based on `--variant`:
+  - What: assign a human-friendly alias to the built template. Defaults based on `--variant` and environment:
+
+  Default for development:
     - `full` → `mcp-dev-gui`
     - `simple` → `mcp-dev-simple`
     - `minimal` → `mcp-dev-minimal`
-  - Example: `--alias mcp-dev-gui`
+
+  Default for production:
+    - `full` → `mcp-prod-gui`
+    - `simple` → `mcp-prod-simple`
+    - `minimal` → `mcp-prod-minimal`
+
+  
+  - You can also use custom alias, example: `--alias custom-alias`
 
 - `--cpu`
   - What: number of vCPUs allocated during build (int)
@@ -82,16 +89,11 @@ python build_dev.py --alias mcp-dev-gui --cpu 4 --memory-mb 4096
 
 ## 💻 Use the Sandbox
 
-### Option 1: Quick demo script (recommended for beginners)
-
 Run the prebuilt quickstart script:
 
 ```bash
-# GUI mode (default)
+# Full mode (with desktop GUI and Chrome)
 python sandbox_deploy.py --template-id <template-id-or-alias>
-
-# Headless mode (skip X/Chrome/VNC/noVNC)
-python sandbox_deploy.py --template-id <template-id-or-alias> --headless
 ```
 
 This script will:
@@ -153,42 +155,6 @@ export E2B_TEMPLATE_ID=mcp-xyz123
 python sandbox_deploy.py --no-internet --no-wait
 ```
 
-
-
-### Option 2: Custom Python code
-
-```python
-from e2b import AsyncSandbox
-import asyncio
-
-async def main():
-    # Create sandbox instance (replace with your template ID)
-    sandbox = await AsyncSandbox.create('mcp-xyz123')
-
-    try:
-        # Start MCP Bridge service
-        process = await sandbox.process.start(
-            cmd="cd /app && ACCESS_TOKEN=my-token npm start"
-        )
-
-        # Wait for the service to start
-        await asyncio.sleep(5)
-
-        # Call the API
-        result = await sandbox.commands.run(
-            'curl http://localhost:3000/health'
-        )
-        print(f'Health: {result.stdout}')
-
-        # Use your sandbox...
-
-    finally:
-        # Cleanup
-        await sandbox.kill()
-
-asyncio.run(main())
-```
-
 ---
 
 ## 📁 Template Layout
@@ -198,23 +164,17 @@ asyncio.run(main())
 | `template.py` | Sandbox template configuration |
 | `build_dev.py` | Dev template build script |
 | `build_prod.py` | Prod template build script |
-| `e2b.Dockerfile` | Full sandbox image definition |
+| `e2b.Dockerfile` | Full sandbox image definition (with pre-built Desktop GUI and Chrome browser) |
+| `e2b.Dockerfile.simple` | Simple image (with Chrome browser) |
 | `e2b.Dockerfile.minimal` | Minimal image (core only) |
-| `servers.json` | MCP servers configuration |
 | `startup.sh` | Sandbox startup script |
 | `nginx.conf` | Nginx reverse proxy config |
-| `view_sandbox_logs.py` | Log viewer tool |
+| `view_sandbox_logs.py` | Exec into sandbox for debug |
 | `e2b_sandbox_manager.py` | Sandbox management tool |
 
 ---
 
 ## 🔍 Manage & Debug
-
-### View sandbox logs
-
-```bash
-python view_sandbox_logs.py <sandbox-id>
-```
 
 ### Manage sandbox instances
 
@@ -226,15 +186,6 @@ python e2b_sandbox_manager.py --template-id <template-or-alias> --sandbox-id dem
 
 # Disable waiting for health / disable internet
 python e2b_sandbox_manager.py --template-id <template-or-alias> --no-wait --no-internet
-
-# List active sandboxes (current process context cache)
-python e2b_sandbox_manager.py list
-
-# Stop a sandbox
-python e2b_sandbox_manager.py stop <sandbox_id>
-
-# Stop all sandboxes
-python e2b_sandbox_manager.py stop-all
 ```
 
 ### Exec into sandbox for debug

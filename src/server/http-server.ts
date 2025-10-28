@@ -78,7 +78,6 @@ export class HttpServer {
   private setupCleanupTimers() {
     // Check if cleanup is disabled via environment variable
     const disableBridgeCleanup = process.env.DISABLE_BRIDGE_CLEANUP === 'true';
-    const disableStreamCleanup = process.env.DISABLE_STREAM_CLEANUP === 'true';
 
     if (!disableBridgeCleanup) {
       // Run bridge cleanup every TTL/3 to catch expired sessions more frequently
@@ -91,18 +90,6 @@ export class HttpServer {
       this.logger.info(`Bridge session cleanup enabled (interval: ${bridgeCleanupInterval}ms, TTL: ${this.CLIENT_CACHE_TTL}ms)`);
     } else {
       this.logger.warn('Bridge session cleanup is DISABLED - sessions will not be automatically cleaned up');
-    }
-
-    if (!disableStreamCleanup) {
-      // Run streamable cleanup every TTL/3
-      const streamCleanupInterval = Math.floor(this.config.streamable.sessionTtlMs / this.CLEANUP_INTERVAL_DIVISOR);
-      this.streamSessionCleanupTimer = setInterval(
-        () => this.streamSessionManager.reapExpiredSessions(),
-        streamCleanupInterval
-      );
-      this.logger.info(`Streamable session cleanup enabled (interval: ${streamCleanupInterval}ms, TTL: ${this.config.streamable.sessionTtlMs}ms)`);
-    } else {
-      this.logger.warn('Streamable session cleanup is DISABLED - sessions will not be automatically cleaned up');
     }
   }
 

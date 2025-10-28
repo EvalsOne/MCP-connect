@@ -132,9 +132,6 @@ export class MCPClientManager {
         case 'tools/list':
           return await client.listTools(params);
 
-        case 'logging/setLevel':
-          return await client.setLoggingLevel(params.level);
-
         case 'ping':
           return await client.ping();
 

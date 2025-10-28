@@ -5,11 +5,6 @@
       "args": ["mcp-server-fetch"],
       "description": "HTTP/HTTPS content fetcher"
     },
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"],
-      "description": "Local filesystem access to /tmp directory"
-    },
     "chrome-devtools-headful": {
       "command": "npx",
       "args": [

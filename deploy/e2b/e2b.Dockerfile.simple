@@ -59,7 +59,7 @@ RUN if [ -f /home/user/.local/bin/uv ]; then install -m 0755 /home/user/.local/b
  && if [ -f /home/user/.local/bin/uvx ]; then install -m 0755 /home/user/.local/bin/uvx /usr/local/bin/uvx; else ln -sf /usr/local/bin/uv /usr/local/bin/uvx; fi
 USER user
 
-RUN git clone -b dev_streamable_http --single-branch https://github.com/EvalsOne/MCP-connect.git /home/user/mcp-connect && \
+RUN git clone https://github.com/EvalsOne/MCP-connect.git /home/user/mcp-connect && \
     cd /home/user/mcp-connect && \
     npm install && \
     npm run build
