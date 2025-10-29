@@ -444,6 +444,14 @@ class E2BSandboxManager:
         # Enable for explicit flag or for headless-like templates (simple/minimal)
         if self.config.headless or self._template_indicates_headless(self.config.template_id):
             logger.info("Headless mode enabled: skipping GUI/noVNC/VNC services")
+            # Ensure a unified startup.log exists and note begin
+            try:
+                init_log_cmd = (
+                    "bash -lc 'printf \"%s Headless startup begin\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" >> /home/user/startup.log'"
+                )
+                await self._run(sandbox, init_log_cmd, background=False, cwd="/home/user")
+            except Exception:
+                pass
             # Proactively stop any GUI services the image entrypoint may have launched
             stop_gui_cmds = [
                 "bash -lc 'pkill -f -- \"--remote-debugging-port=9222\" 2>/dev/null || true'",
@@ -462,7 +470,15 @@ class E2BSandboxManager:
             # Ensure nginx running
             try:
                 logger.info("Ensuring nginx reverse proxy is running (headless mode)")
-                nginx_cmd = "bash -lc 'if pgrep -x nginx >/dev/null; then echo nginx already running; else sudo nginx -g \"daemon off;\" & echo $! > /home/user/nginx.pid; fi'"
+                nginx_cmd = (
+                    "bash -lc 'LOG=/home/user/startup.log; "
+                    "if pgrep -x nginx >/dev/null; then "
+                    "  printf \"%s nginx already running\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" >> $LOG; "
+                    "else "
+                    "  nohup sudo nginx -g \"daemon off;\" > /home/user/nginx.log 2>&1 & pid=$!; echo $pid > /home/user/nginx.pid; "
+                    "  printf \"%s nginx started pid=%s\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" \"$pid\" >> $LOG; "
+                    "fi'"
+                )
                 await self._run(sandbox, nginx_cmd, background=False, cwd="/home/user")
             except CommandExitException as e:
                 logger.warning("Failed to start nginx: %s", getattr(e, 'stderr', '') or str(e))
@@ -495,9 +511,19 @@ class E2BSandboxManager:
                 mcp_start_cmd = (
                     "bash -lc "
                     "'set -e; cd /home/user/mcp-connect; "
-                    "nohup npm run start > start.log 2>&1 & echo $! > mcp.pid'"
+                    "nohup npm run start > start.log 2>&1 & pid=$!; echo $pid > mcp.pid; "
+                    "printf \"%s mcp-connect started pid=%s\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" \"$pid\" >> /home/user/startup.log'"
                 )
                 await self._run(sandbox, mcp_start_cmd, background=False, envs=mcp_envs, cwd="/home/user")
+
+            # Mark completion in startup.log
+            try:
+                done_log_cmd = (
+                    "bash -lc 'printf \"%s Headless startup completed\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" >> /home/user/startup.log'"
+                )
+                await self._run(sandbox, done_log_cmd, background=False, cwd="/home/user")
+            except Exception:
+                pass
 
             return {
                 "handles": {

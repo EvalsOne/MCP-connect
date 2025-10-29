@@ -102,6 +102,7 @@ This script will:
 2. Start the MCP Bridge service
 3. Auto-test health check and tool calls
 4. Print sandbox info
+5. Write a unified startup log to `/home/user/startup.log` (both GUI and headless templates)
 
 Parameters:
 

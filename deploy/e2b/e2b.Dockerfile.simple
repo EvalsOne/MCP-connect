@@ -176,6 +176,9 @@ RUN printf '%s\n' \
 '' \
 'set -euo pipefail' \
 '' \
+'# Persist all startup output to a unified log file' \
+'exec >> /home/user/startup.log 2>&1' \
+'' \
 'echo "Starting E2B MCP Sandbox..."' \
 '' \
 'AUTH_TOKEN="${E2B_MCP_AUTH_TOKEN:-${AUTH_TOKEN:-}}"' \

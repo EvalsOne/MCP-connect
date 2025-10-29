@@ -15,6 +15,9 @@ TINT2_CONFIG_DIR=${CONFIG_ROOT}/tint2
 DESKTOP_TEMPLATE_DIR=/opt/mcp-desktop
 CHROME_LAUNCHER=/home/user/bin/chrome-devtools.sh
 
+# Persist all startup output to a unified log file
+exec >> "${LOG_DIR}/startup.log" 2>&1
+
 log() {
     printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
 }

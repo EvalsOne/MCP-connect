@@ -10,6 +10,9 @@ cat > /home/user/startup.sh <<'EOF'
 
 set -euo pipefail
 
+# Persist all startup output to a unified log file
+exec >> /home/user/startup.log 2>&1
+
 LOG_DIR=/home/user
 
 log() {
