@@ -394,23 +394,17 @@ class E2BSandboxManager:
             "NOVNC_WEBROOT": novnc_webroot,
             "VNC_PASSWORD": vnc_password,
         }
+        # Pass HEADLESS flag so startup.sh decides orchestration flow (single orchestrator)
+        service_envs["HEADLESS"] = (
+            "1" if (self.config.headless or self._template_indicates_headless(self.config.template_id)) else "0"
+        )
         # Only pass optional x11vnc tuning envs if the outer environment explicitly set them.
         for key in ("X11VNC_WAIT", "X11VNC_DEFER", "X11VNC_COMPRESSION", "X11VNC_QUALITY", "X11VNC_EXTRA"):
             if key in os.environ and str(os.environ.get(key, "")).strip() != "":
                 service_envs[key] = os.environ[key]
 
-        logger.info("Configuring MCP environment variables inside sandbox...")
-        # Quote values so dotenv doesn't treat # as comment
-        env_file_contents = (
-            f"AUTH_TOKEN=\"{self.config.auth_token}\"\n"
-            f"PORT=\"{self.config.port}\"\n"
-            f"HOST=\"{self.config.host}\"\n"
-            "LOG_LEVEL=\"info\"\n"
-        )
-
-        # Ensure mcp-connect dir exists and write .env
+        logger.info("Preparing mcp-connect directory inside sandbox (startup.sh will manage .env)")
         await self._run(sandbox, "mkdir -p /home/user/mcp-connect", background=False, envs=envs, cwd="/home/user")
-        await self._write(sandbox, "/home/user/mcp-connect/.env", env_file_contents)
 
         # If a local nginx.conf exists in repo, push it into the sandbox and apply
         try:
@@ -439,104 +433,7 @@ class E2BSandboxManager:
         except Exception as e:
             logger.warning("Failed to push/apply nginx.conf: %s", str(e))
 
-        # Ensure startup.sh exists and use it to bootstrap services (Xvfb/x11vnc/noVNC/nginx/etc.)
-        # Headless mode: skip GUI bootstrap entirely; ensure nginx + mcp-connect only
-        # Enable for explicit flag or for headless-like templates (simple/minimal)
-        if self.config.headless or self._template_indicates_headless(self.config.template_id):
-            logger.info("Headless mode enabled: skipping GUI/noVNC/VNC services")
-            # Ensure a unified startup.log exists and note begin
-            try:
-                init_log_cmd = (
-                    "bash -lc 'printf \"%s Headless startup begin\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" >> /home/user/startup.log'"
-                )
-                await self._run(sandbox, init_log_cmd, background=False, cwd="/home/user")
-            except Exception:
-                pass
-            # Proactively stop any GUI services the image entrypoint may have launched
-            stop_gui_cmds = [
-                "bash -lc 'pkill -f -- \"--remote-debugging-port=9222\" 2>/dev/null || true'",
-                "bash -lc 'pkill -f websockify 2>/dev/null || true'",
-                "bash -lc 'pkill -f x11vnc 2>/dev/null || true'",
-                "bash -lc 'pkill -x fluxbox 2>/dev/null || true'",
-                "bash -lc 'pkill -f pcmanfm 2>/dev/null || true'",
-                f"bash -lc 'pkill -f \"Xvfb {self.config.display}\" 2>/dev/null || true'",
-            ]
-            for cmd in stop_gui_cmds:
-                try:
-                    await self._run(sandbox, cmd, background=False, cwd="/home/user")
-                except Exception:
-                    pass
-
-            # Ensure nginx running
-            try:
-                logger.info("Ensuring nginx reverse proxy is running (headless mode)")
-                nginx_cmd = (
-                    "bash -lc 'LOG=/home/user/startup.log; "
-                    "if pgrep -x nginx >/dev/null; then "
-                    "  printf \"%s nginx already running\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" >> $LOG; "
-                    "else "
-                    "  nohup sudo nginx -g \"daemon off;\" > /home/user/nginx.log 2>&1 & pid=$!; echo $pid > /home/user/nginx.pid; "
-                    "  printf \"%s nginx started pid=%s\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" \"$pid\" >> $LOG; "
-                    "fi'"
-                )
-                await self._run(sandbox, nginx_cmd, background=False, cwd="/home/user")
-            except CommandExitException as e:
-                logger.warning("Failed to start nginx: %s", getattr(e, 'stderr', '') or str(e))
-
-            # Start MCP-connect if not healthy
-            logger.info("Ensuring MCP-connect is running on port %s (headless)", self.config.port)
-            port = self.config.port
-            try:
-                port_probe = await self._run(sandbox, f"bash -lc \"code=$(curl -s -o /dev/null -w '%{{http_code}}' http://127.0.0.1:{port}/health || true); echo $code\"", background=False, cwd="/home/user")
-                mcp_listening = '200' in (port_probe.stdout or '')
-            except CommandExitException:
-                mcp_listening = False
-            mcp_envs = {**envs, "LOG_LEVEL": "info"}
-            if not mcp_listening:
-                try:
-                    final_dep_cmd = (
-                        "bash -lc "
-                        "'set -e; cd /home/user/mcp-connect; "
-                        "FORCE=${NPM_CI_ALWAYS:-0}; "
-                        "if [ \"$FORCE\" = \"1\" ] || [ ! -d node_modules ] || [ package-lock.json -nt node_modules ] || [ package.json -nt node_modules ]; then "
-                        "  echo \"Final dep check: installing/updating npm dependencies...\"; npm ci --no-audit || npm install --no-audit; "
-                        "else "
-                        "  echo \"Final dep check: node_modules up-to-date; skipping\"; "
-                        "fi'"
-                    )
-                    await self._run(sandbox, final_dep_cmd, background=False, envs=envs, cwd="/home/user")
-                except CommandExitException as e:
-                    logger.warning("Dependency check error (continuing): %s", getattr(e, 'stderr', '') or str(e))
-
-                mcp_start_cmd = (
-                    "bash -lc "
-                    "'set -e; cd /home/user/mcp-connect; "
-                    "nohup npm run start > start.log 2>&1 & pid=$!; echo $pid > mcp.pid; "
-                    "printf \"%s mcp-connect started pid=%s\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" \"$pid\" >> /home/user/startup.log'"
-                )
-                await self._run(sandbox, mcp_start_cmd, background=False, envs=mcp_envs, cwd="/home/user")
-
-            # Mark completion in startup.log
-            try:
-                done_log_cmd = (
-                    "bash -lc 'printf \"%s Headless startup completed\\n\" \"$(date -u '+%Y-%m-%dT%H:%M:%SZ')\" >> /home/user/startup.log'"
-                )
-                await self._run(sandbox, done_log_cmd, background=False, cwd="/home/user")
-            except Exception:
-                pass
-
-            return {
-                "handles": {
-                    "chrome": None,
-                    "nginx": None,
-                    "mcp_connect": None,
-                    "xvfb": None,
-                    "fluxbox": None,
-                    "x11vnc": None,
-                    "novnc": None,
-                },
-                "envs": mcp_envs,
-            }
+        # Ensure startup.sh exists and use it to bootstrap services (single orchestrator inside sandbox)
 
         logger.info("Ensuring startup.sh is available inside sandbox")
         startup_exists = False
@@ -690,8 +587,7 @@ class E2BSandboxManager:
                 logger.error("Failed to launch startup.sh: %s", getattr(e, 'stderr', '') or str(e))
                 raise
 
-            logger.info("startup.sh launched; allowing services time to come up")
-            await asyncio.sleep(5)
+            logger.info("startup.sh launched; delegating orchestration to startup.sh")
         else:
             logger.warning("startup.sh is not present inside sandbox; GUI services may be unavailable")
 
@@ -699,48 +595,8 @@ class E2BSandboxManager:
         chrome_handle = None
         nginx_handle = None
 
-        # Start MCP-connect only if PORT is not listening
-        logger.info("Ensuring MCP-connect is running on port %s...", self.config.port)
-        port = self.config.port
-        # Probe MCP-connect via HTTP health to avoid relying on ss/lsof
-        try:
-            port_probe = await self._run(sandbox, f"bash -lc \"code=$(curl -s -o /dev/null -w '%{{http_code}}' http://127.0.0.1:{port}/health || true); echo $code\"", background=False, cwd="/home/user")
-            mcp_listening = '200' in (port_probe.stdout or '')
-        except CommandExitException:
-            mcp_listening = False
-
-        logger.info("Launching MCP-connect server if needed...")
-        mcp_envs = {**envs, "LOG_LEVEL": "info"}
+        # All service management is delegated to startup.sh; avoid duplicate MCP/nginx handling
         mcp_handle = None
-        if not mcp_listening:
-            # Final dependency guard before starting the server (idempotent, fast when up-to-date)
-            try:
-                logger.info("Performing final dependency check before starting MCP-connect...")
-                final_dep_cmd = (
-                    "bash -lc "
-                    "'set -e; cd /home/user/mcp-connect; "
-                    "FORCE=${NPM_CI_ALWAYS:-0}; "
-                    "if [ \"$FORCE\" = \"1\" ] || [ ! -d node_modules ] || [ package-lock.json -nt node_modules ] || [ package.json -nt node_modules ]; then "
-                    "  echo \"Final dep check: installing/updating npm dependencies...\"; npm ci --no-audit || npm install --no-audit; "
-                    "else "
-                    "  echo \"Final dep check: node_modules up-to-date; skipping\"; "
-                    "fi'"
-                )
-                await self._run(sandbox, final_dep_cmd, background=False, envs=envs, cwd="/home/user")
-            except CommandExitException as e:
-                logger.warning(
-                    "Final dependency check reported an error (continuing to start anyway): %s",
-                    getattr(e, 'stderr', '') or str(e),
-                )
-            # Start MCP-connect detached via nohup and record PID + log
-            mcp_start_cmd = (
-                "bash -lc "
-                "'set -e; cd /home/user/mcp-connect; "
-                "nohup npm run start > start.log 2>&1 & echo $! > mcp.pid'"
-            )
-            await self._run(sandbox, mcp_start_cmd, background=False, envs=mcp_envs, cwd="/home/user")
-        else:
-            logger.info("Port %s already listening; skipping MCP-connect launch", port)
 
         return {
             "handles": {
@@ -752,7 +608,7 @@ class E2BSandboxManager:
                 "x11vnc": None,
                 "novnc": None,
             },
-            "envs": mcp_envs,
+            "envs": {**envs, "LOG_LEVEL": "info"},
         }
 
     @staticmethod
@@ -1195,7 +1051,8 @@ async def main():
     except (KeyboardInterrupt, asyncio.CancelledError):
         # Gracefully handle both direct KeyboardInterrupt and asyncio task cancellation
         print("\n🛑 Stopping sandbox...")
-        await manager.stop_all_sandboxes()
+        # Only stop the current sandbox instead of all
+        await manager.stop_sandbox(args.sandbox_id)
         print("✅ Sandbox stopped")
 
 if __name__ == "__main__":

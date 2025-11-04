@@ -473,6 +473,13 @@ else
     ) &
 fi
 
+# Mark GUI readiness flag after both noVNC and Chrome are up
+mkdir -p /home/user/.ready
+if [ "${NOVNC_READY}" = "1" ] && [ -n "${CHROME_PID:-}" ]; then
+    log "GUI ready: creating flag /home/user/.ready/gui"
+    touch /home/user/.ready/gui
+fi
+
 # nginx proxy ------------------------------------------------------------------
 log "Ensuring nginx reverse proxy is running"
 if pgrep -x nginx >/dev/null 2>&1; then
