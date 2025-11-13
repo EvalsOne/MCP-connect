@@ -34,9 +34,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/EvalsOne/MCP-bridge"
-Repository = "https://github.com/EvalsOne/MCP-bridge"
-Issues = "https://github.com/EvalsOne/MCP-bridge/issues"
+Homepage = "https://github.com/EvalsOne/MCP-connect"
+Repository = "https://github.com/EvalsOne/MCP-connect"
+Issues = "https://github.com/EvalsOne/MCP-connect/issues"
 
 [project.scripts]
 e2b-mcp-sandbox = "deploy.e2b.sandbox_deploy:main"

@@ -211,8 +211,9 @@ export class HttpServer {
         res.json(response);
 
       } catch (error) {
+        const errorText = error instanceof Error ? error.message : String(error);
         this.logger.error('Error processing bridge request:', error);
-        res.status(500).json({ error: 'Failed to process request' });
+        res.status(500).json({ error: `Failed to process request: ${errorText}` });
       }
     });
 
