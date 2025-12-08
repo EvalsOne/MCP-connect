@@ -526,44 +526,17 @@ class E2BSandboxManager:
                 except CommandExitException as e:
                     logger.warning("Failed to chmod chrome-devtools-wrapper.sh: %s", getattr(e, 'stderr', '') or str(e))
 
-        servers_contents: Optional[str] = None
-        servers_remote_ok = False
-        if fetch_remote:
-            try:
-                logger.info("Fetching servers.json from remote: %s", remote_base)
-                cmd = (
-                    f"bash -lc 'curl -fsSL {remote_base}/servers.json -o /home/user/.config/mcp/servers.json && echo OK'"
-                )
-                await self._run(sandbox, "mkdir -p /home/user/.config/mcp", background=False, cwd="/home/user")
-                out = await self._run(sandbox, cmd, background=False, cwd="/home/user")
-                if out and "OK" in (out.stdout or ""):
-                    servers_remote_ok = True
-            except Exception:
-                pass
-        if not servers_remote_ok:
+        # MCP servers configuration: optionally override repo mcp-servers.json inside mcp-connect
+        try:
             if os.path.isfile(local_servers):
                 with open(local_servers, "r", encoding="utf-8") as handle:
                     servers_contents = handle.read()
-            if servers_contents is None:
-                # also try root-level mcp-servers.json as a source of truth
-                try:
-                    root_servers = os.path.abspath(os.path.join(repo_dir, os.pardir, os.pardir, "mcp-servers.json"))
-                    if os.path.isfile(root_servers):
-                        with open(root_servers, "r", encoding="utf-8") as handle:
-                            servers_contents = handle.read()
-                        logger.info("Using root mcp-servers.json for sandbox config")
-                except Exception:
-                    pass
-            if servers_contents is None:
-                servers_contents = _resource_text('deploy.e2b', 'servers.json')
-                if servers_contents:
-                    logger.info("Using packaged servers.json from deploy.e2b")
-            if servers_contents is not None:
-                logger.info("Updating MCP servers.json inside sandbox")
-                await self._run(sandbox, "mkdir -p /home/user/.config/mcp", background=False, cwd="/home/user")
-                await self._write(sandbox, "/home/user/.config/mcp/servers.json", servers_contents)
+                logger.info("Using local deploy/e2b/servers.json to override /home/user/mcp-connect/mcp-servers.json")
+                await self._write(sandbox, "/home/user/mcp-connect/mcp-servers.json", servers_contents)
             else:
-                logger.warning("servers.json not found at %s and no packaged/root alternative", local_servers)
+                logger.info("No deploy/e2b/servers.json found; keeping mcp-connect repo mcp-servers.json")
+        except Exception as e:
+            logger.warning("Failed to update /home/user/mcp-connect/mcp-servers.json: %s", str(e))
 
         if startup_exists:
             try:
@@ -994,7 +967,7 @@ async def main():
     config = SandboxConfig(
         template_id=template_id,
         timeout=args.timeout,
-        metadata={"purpose": ("mcp-dev-headless" if args.headless else "mcp-dev-gui")},
+        metadata={"purpose": ("mcp-dev-headless" if args.headless else "mcp-dev-full")},
         headless=bool(args.headless),
     )
     # Prefer CLI --auth-token; otherwise fall back to environment variables
