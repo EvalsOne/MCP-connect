@@ -331,6 +331,34 @@ export class HttpServer {
     return this.streamableServers[serverId];
   }
 
+  /**
+   * Extract per-request environment overrides from headers.
+   * Convention: X-MCP-ENV-FOO: bar  -> env.FOO = "bar"
+   */
+  private extractStreamEnvFromHeaders(req: Request): Record<string, string> {
+    const overrides: Record<string, string> = {};
+
+    for (const [headerKey, rawValue] of Object.entries(req.headers)) {
+      const key = headerKey.toLowerCase();
+      const prefix = 'x-mcp-env-';
+      if (!key.startsWith(prefix)) {
+        continue;
+      }
+
+      const envKey = headerKey.slice(prefix.length).toUpperCase();
+      if (!envKey) {
+        continue;
+      }
+
+      const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
+      if (typeof value === 'string' && value.length > 0) {
+        overrides[envKey] = value;
+      }
+    }
+
+    return overrides;
+  }
+
   private acceptHeaderSupportsStreaming(headerValue: string | undefined): boolean {
     if (!headerValue) {
       return false;
@@ -389,6 +417,14 @@ export class HttpServer {
 
     let session: StreamSession | undefined;
     let sessionId: string;
+    const headerEnvOverrides = this.extractStreamEnvFromHeaders(req);
+    const effectiveServerConfig: StreamableServerConfig = {
+      ...serverConfig,
+      env: {
+        ...(serverConfig.env ?? {}),
+        ...headerEnvOverrides,
+      },
+    };
 
     try {
       this.logger.info(`Session header: ${sessionHeader}, hasRequests: ${hasRequests}`);
@@ -398,7 +434,7 @@ export class HttpServer {
           return;
         }
 
-        session = await this.streamSessionManager.createSession(serverId, serverConfig);
+        session = await this.streamSessionManager.createSession(serverId, effectiveServerConfig);
         sessionId = session.id;
       } else {
         session = this.streamSessionManager.getSession(sessionHeader, serverId);
