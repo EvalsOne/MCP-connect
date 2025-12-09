@@ -162,7 +162,7 @@ export function loadConfig(): Config {
       allowedOrigins: parseAllowedOrigins(),
     },
     logging: {
-      level: process.env.LOG_LEVEL || 'INFO',
+      level: (process.env.LOG_LEVEL || 'info').toLowerCase(),
     },
     streamable: {
       sessionTtlMs: parseInt(process.env.STREAM_SESSION_TTL_MS || `${5 * 60 * 1000}`, 10),

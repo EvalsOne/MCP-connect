@@ -29,12 +29,17 @@ export class MCPClientManager {
     version: "1.0.0"
   };
   private readonly capabilities: ClientCapabilities = {
-    prompts: true,
-    tools: true,
-    resources: {
-      subscribe: true
-    },
-    logging: true
+    // Surface legacy capabilities via the experimental shim to satisfy the v1.1 MCP schema.
+    experimental: {
+      legacyCapabilities: {
+        prompts: true,
+        tools: true,
+        resources: {
+          subscribe: true
+        },
+        logging: true
+      }
+    }
   };
 
   constructor(logger: Logger) {
