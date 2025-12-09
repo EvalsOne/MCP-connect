@@ -20,13 +20,30 @@ export class StreamSession extends EventEmitter {
     this.logger = logger;
     this.serverConfig = serverConfig;
     this.id = sessionId ?? randomUUID();
+
+    const mergedEnv = {
+      ...getDefaultEnvironment(),
+      ...(serverConfig.env ?? {}),
+    };
+
+    const n8nUrl = mergedEnv['N8N_API_URL'];
+    const n8nKey = mergedEnv['N8N_API_KEY'];
+    if (n8nUrl || n8nKey) {
+      const maskedKey =
+        typeof n8nKey === 'string' && n8nKey.length > 4
+          ? `***${n8nKey.slice(-4)}`
+          : n8nKey
+            ? '***'
+            : '<undefined>';
+      this.logger.info(
+        `Stream session ${this.id} env snapshot: N8N_API_URL=${n8nUrl ?? '<undefined>'}, N8N_API_KEY=${maskedKey}`,
+      );
+    }
+
     this.transport = new StdioClientTransport({
       command: serverConfig.command,
       args: serverConfig.args ?? [],
-      env: {
-        ...getDefaultEnvironment(),
-        ...(serverConfig.env ?? {}),
-      },
+      env: mergedEnv,
       stderr: 'pipe',
     });
 
