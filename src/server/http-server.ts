@@ -160,14 +160,40 @@ export class HttpServer {
     return masked;
   }
 
+  /**
+   * Mask sensitive values in headers for logging.
+   * - Authorization
+   * - Any header that looks like an API key
+   * - X-MCP-ENV-* overrides (may contain secrets)
+   */
+  private maskHeadersForLogging(headers: Record<string, unknown>): Record<string, unknown> {
+    const masked: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(headers)) {
+      const lowerKey = key.toLowerCase();
+      const shouldMask =
+        lowerKey === 'authorization' ||
+        lowerKey.startsWith('x-mcp-env-') ||
+        lowerKey.includes('api_key') ||
+        lowerKey.includes('apikey') ||
+        lowerKey.endsWith('-key');
+
+      if (shouldMask) {
+        masked[key] = '********';
+      } else {
+        masked[key] = value;
+      }
+    }
+    return masked;
+  }
+
   private setupRoutes(): void {
     // Bridge endpoint
     this.app.post('/bridge', async (req: Request, res: Response) => {
       let clientId: string | undefined;
       try {
         const { serverPath, method, params, args, env } = req.body;
-        
         this.logger.info('Bridge request received:', this.maskSensitiveData(req.body));
+        this.logger.info('Bridge request headers:', this.maskHeadersForLogging(req.headers as any));
         if (!serverPath || !method || !params) {
           res.status(400).json({ 
             error: 'Invalid request body. Required: serverPath, method, params. Optional: args' 
@@ -390,6 +416,7 @@ export class HttpServer {
 
   private async handleStreamablePost(req: Request, res: Response): Promise<void> {
     this.logger.info(`Streamable request received: ${req.method} ${req.originalUrl}`);
+    this.logger.info('Streamable request headers:', this.maskHeadersForLogging(req.headers as any));
     const serverId = req.params.serverId;
     const serverConfig = this.getStreamableServer(serverId);
     if (!serverConfig) {
@@ -420,6 +447,9 @@ export class HttpServer {
     let session: StreamSession | undefined;
     let sessionId: string;
     const headerEnvOverrides = this.extractStreamEnvFromHeaders(req);
+    if (Object.keys(headerEnvOverrides).length > 0) {
+      this.logger.info('Streamable env overrides from headers:', Object.keys(headerEnvOverrides));
+    }
     const effectiveServerConfig: StreamableServerConfig = {
       ...serverConfig,
       env: {
