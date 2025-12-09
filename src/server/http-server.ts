@@ -337,19 +337,21 @@ export class HttpServer {
    */
   private extractStreamEnvFromHeaders(req: Request): Record<string, string> {
     const overrides: Record<string, string> = {};
+    const prefix = 'x-mcp-env-';
 
     for (const [headerKey, rawValue] of Object.entries(req.headers)) {
-      const key = headerKey.toLowerCase();
-      const prefix = 'x-mcp-env-';
-      if (!key.startsWith(prefix)) {
+      const lowerKey = headerKey.toLowerCase();
+      if (!lowerKey.startsWith(prefix)) {
         continue;
       }
 
-      const envKey = headerKey.slice(prefix.length).toUpperCase();
-      if (!envKey) {
+      // Strip prefix, normalise: hyphens -> underscores, upper-case for env
+      const rawEnvName = lowerKey.slice(prefix.length);
+      if (!rawEnvName) {
         continue;
       }
 
+      const envKey = rawEnvName.replace(/-/g, '_').toUpperCase();
       const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
       if (typeof value === 'string' && value.length > 0) {
         overrides[envKey] = value;

@@ -36,8 +36,8 @@
         "MCP_MODE": "stdio",
         "LOG_LEVEL": "error",
         "DISABLE_CONSOLE_OUTPUT": "true",
-        "N8N_API_URL": "https://your-n8n-instance.com",
-        "N8N_API_KEY": "your-api-key"
+        "N8N_API_URL": "${N8N_API_URL}",
+        "N8N_API_KEY": "${N8N_API_KEY}"
       }
     }
   }
