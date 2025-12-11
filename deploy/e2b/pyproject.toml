@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "e2b-mcp-sandbox"
-version = "0.1.9"
+version = "0.2.0"
 description = "E2B Sandbox Manager for MCP-enabled Web Sandbox"
 readme = "README.md"
 authors = [
