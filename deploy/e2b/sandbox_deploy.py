@@ -14,28 +14,39 @@ from urllib.parse import quote as _url_quote
 #############################
 # Sandbox client import logic
 #############################
-# We try modern async-first APIs before falling back to legacy ones.
+# Prefer modern sync Sandbox API first, then fall back to async and legacy
 SandboxType = Any  # alias for type hints after dynamic import
 _sandbox_create_fn: Optional[Callable[..., Any]] = None
 _sandbox_kind: str = "unknown"
-try:  # Preferred: new async sandbox interface
-    from e2b import AsyncSandbox as _AsyncSandbox  # type: ignore
-    # Async interface typically exposes an async classmethod .create
-    if hasattr(_AsyncSandbox, 'create'):
-        _sandbox_create_fn = _AsyncSandbox.create  # type: ignore
-        SandboxType = _AsyncSandbox  # type: ignore
-        _sandbox_kind = 'async'
+
+try:  # Preferred: modern sync Sandbox interface from e2b
+    from e2b import Sandbox as _SyncSandbox  # type: ignore
+    if hasattr(_SyncSandbox, "create"):
+        _sandbox_create_fn = _SyncSandbox.create  # type: ignore
+        SandboxType = _SyncSandbox  # type: ignore
+        _sandbox_kind = "sync"
 except Exception:  # pragma: no cover
     _sandbox_create_fn = None
 
 if _sandbox_create_fn is None:
+    try:  # Fallback: async sandbox interface
+        from e2b import AsyncSandbox as _AsyncSandbox  # type: ignore
+        # Async interface typically exposes an async classmethod .create
+        if hasattr(_AsyncSandbox, "create"):
+            _sandbox_create_fn = _AsyncSandbox.create  # type: ignore
+            SandboxType = _AsyncSandbox  # type: ignore
+            _sandbox_kind = "async"
+    except Exception:  # pragma: no cover
+        _sandbox_create_fn = None
+
+if _sandbox_create_fn is None:
     try:  # Legacy: e2b_code_interpreter Sandbox (sync create)
         from e2b_code_interpreter import Sandbox as _LegacySandbox  # type: ignore
-        if hasattr(_LegacySandbox, 'create'):
+        if hasattr(_LegacySandbox, "create"):
             # Legacy create is synchronous; we will offload with to_thread
             _sandbox_create_fn = _LegacySandbox.create  # type: ignore
             SandboxType = _LegacySandbox  # type: ignore
-            _sandbox_kind = 'legacy'
+            _sandbox_kind = "legacy"
     except Exception:  # pragma: no cover
         _sandbox_create_fn = None
 
@@ -967,7 +978,7 @@ async def main():
     config = SandboxConfig(
         template_id=template_id,
         timeout=args.timeout,
-        metadata={"purpose": ("mcp-dev-headless" if args.headless else "mcp-dev-full")},
+        metadata={"purpose": ("mcp-dev-headless" if args.headless else "mcp-dev-gui")},
         headless=bool(args.headless),
     )
     # Prefer CLI --auth-token; otherwise fall back to environment variables

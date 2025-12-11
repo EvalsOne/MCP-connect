@@ -30,7 +30,7 @@
       }
     },
     "n8n-mcp": {
-      "command": "/usr/bin/npx",
+      "command": "npx",
       "args": ["n8n-mcp"],
       "env": {
         "MCP_MODE": "stdio",
