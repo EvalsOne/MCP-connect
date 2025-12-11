@@ -539,13 +539,23 @@ class E2BSandboxManager:
 
         # MCP servers configuration: optionally override repo mcp-servers.json inside mcp-connect
         try:
+            servers_contents: Optional[str] = None
+            # 1) 优先使用与 sandbox_deploy.py 同目录的 servers.json（开发场景）
             if os.path.isfile(local_servers):
                 with open(local_servers, "r", encoding="utf-8") as handle:
                     servers_contents = handle.read()
                 logger.info("Using local deploy/e2b/servers.json to override /home/user/mcp-connect/mcp-servers.json")
+            # 2) 若同目录没有，则尝试使用打包在 deploy.e2b 包里的 servers.json（生产安装场景）
+            if servers_contents is None:
+                pkg_servers = _resource_text('deploy.e2b', 'servers.json')
+                if pkg_servers:
+                    servers_contents = pkg_servers
+                    logger.info("Using packaged deploy.e2b/servers.json to override /home/user/mcp-connect/mcp-servers.json")
+
+            if servers_contents is not None:
                 await self._write(sandbox, "/home/user/mcp-connect/mcp-servers.json", servers_contents)
             else:
-                logger.info("No deploy/e2b/servers.json found; keeping mcp-connect repo mcp-servers.json")
+                logger.info("No deploy/e2b/servers.json (local or packaged) found; keeping mcp-connect repo mcp-servers.json")
         except Exception as e:
             logger.warning("Failed to update /home/user/mcp-connect/mcp-servers.json: %s", str(e))
 
