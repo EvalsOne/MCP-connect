@@ -41,6 +41,10 @@ function validateConfig(config: Config): void {
     throw new Error('PORT is required');
   }
 
+  if (!config.security.authToken) {
+    throw new Error('ACCESS_TOKEN is required. Set ACCESS_TOKEN in your .env file before starting the server.');
+  }
+
   if (Number.isNaN(config.streamable.sessionTtlMs) || config.streamable.sessionTtlMs <= 0) {
     throw new Error('STREAM_SESSION_TTL_MS must be a positive integer');
   }
@@ -158,7 +162,7 @@ export function loadConfig(): Config {
       port: parseInt(process.env.PORT || '3000', 10),
     },
     security: {
-      authToken: process.env.AUTH_TOKEN || process.env.ACCESS_TOKEN || '',
+      authToken: (process.env.ACCESS_TOKEN || '').trim(),
       allowedOrigins: parseAllowedOrigins(),
     },
     logging: {

@@ -38,9 +38,6 @@ export class HttpServer {
     
     this.accessToken = this.config.security.authToken;
     this.allowedOrigins = this.config.security.allowedOrigins;
-    if (!this.accessToken) {
-      this.logger.warn('No AUTH_TOKEN environment variable set. This is a security risk.');
-    }
 
     if (process.argv.includes('--tunnel')) {
       this.tunnelManager = new TunnelManager(logger);

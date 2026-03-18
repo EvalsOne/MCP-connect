@@ -75,6 +75,8 @@ npm install
 cp .env.example .env
 ```
 
+Set `ACCESS_TOKEN` in `.env` before starting the server. Startup fails if it is empty.
+
 **B. Configure MCP servers**
 
 For Streamable HTTP method, each MCP server needs to be configurated separately, edit file to add more configurations other than the existing sample servers.
@@ -135,7 +137,7 @@ Note: You must configure `mcp-servers.json` before starting the service, otherwi
 
 Non-standard invocation where you implement methods like `tools/list`, `tools/call`, etc.
 
-Include ``Authorization: Bearer <token>`` in request header if `ACCESS_TOKEN` is set in .env file
+Include ``Authorization: Bearer <token>`` in every request header. `ACCESS_TOKEN` is required at startup.
 
 #### Example 1: List available tools
 
@@ -173,7 +175,7 @@ curl -X POST http://localhost:3000/bridge \
 ### Security
 
 #### Authentication
-MCP Connect uses a simple token-based authentication system. The token is stored in the .env file. If the token is set, MCP Connect will use it to authenticate the request.
+MCP Connect requires a token-based authentication system. Set `ACCESS_TOKEN` in `.env` before startup. If it is empty, the server exits with a configuration error.
 
 ```bash
 Authorization: Bearer <your_auth_token>
@@ -212,7 +214,7 @@ Path params:
 - `serverId`: server ID defined in `MCP_SERVERS`
 
 Headers:
-- `Authorization: Bearer <token>` (if `ACCESS_TOKEN` is set)
+- `Authorization: Bearer <token>` (required)
 - `Accept: application/json, text/event-stream` (required)
 - `mcp-session-id: <session-id>` (optional, reuse existing session)
 
@@ -231,7 +233,7 @@ Body:
 Original request/response bridge mode
 
 Headers:
-- `Authorization: Bearer <token>` (if `ACCESS_TOKEN` is set)
+- `Authorization: Bearer <token>` (required)
 - `Content-Type: application/json`
 
 Body:
